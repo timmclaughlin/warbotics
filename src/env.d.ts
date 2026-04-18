@@ -17,6 +17,7 @@ interface Env {
   SLACK_SIGNING_SECRET: string;
   SLACK_REDIRECT_URI: string;
   SLACK_TEAM_ID: string;
+  SLACK_TEAM_DOMAIN: string;
   SESSION_SECRET: string;
   CONTENT_REPO: string;
   CONTENT_BRANCH: string;

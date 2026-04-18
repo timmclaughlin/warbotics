@@ -23,6 +23,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
     redirectUri: env.SLACK_REDIRECT_URI,
     state,
     teamId: env.SLACK_TEAM_ID || undefined,
+    teamDomain: env.SLACK_TEAM_DOMAIN || undefined,
   });
 
   const cookie = [

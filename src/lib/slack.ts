@@ -1,7 +1,6 @@
 // Slack "Sign in with Slack" (OpenID Connect) helpers.
 // Docs: https://api.slack.com/authentication/sign-in-with-slack
 
-const AUTHORIZE_URL = "https://slack.com/openid/connect/authorize";
 const TOKEN_URL = "https://slack.com/api/openid.connect.token";
 const USERINFO_URL = "https://slack.com/api/openid.connect.userInfo";
 
@@ -12,6 +11,10 @@ export function buildAuthorizeUrl(params: {
   redirectUri: string;
   state: string;
   teamId?: string;
+  // When set, the authorize request is sent to `<teamDomain>.slack.com`
+  // instead of `slack.com`. This bypasses Slack's workspace-picker screen
+  // when the user isn't already signed in to the target workspace.
+  teamDomain?: string;
   nonce?: string;
 }): string {
   const qs = new URLSearchParams({
@@ -23,7 +26,8 @@ export function buildAuthorizeUrl(params: {
   });
   if (params.teamId) qs.set("team", params.teamId);
   if (params.nonce) qs.set("nonce", params.nonce);
-  return `${AUTHORIZE_URL}?${qs.toString()}`;
+  const host = params.teamDomain ? `${params.teamDomain}.slack.com` : "slack.com";
+  return `https://${host}/openid/connect/authorize?${qs.toString()}`;
 }
 
 export interface SlackTokenResponse {
