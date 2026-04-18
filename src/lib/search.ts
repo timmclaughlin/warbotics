@@ -31,7 +31,12 @@ interface InstanceCreateOptions {
   indexMethod?: { keyword?: boolean; vector?: boolean };
   keywordTokenizer?: "porter" | "trigram";
   reranking?: boolean;
-  website?: { url: string };
+  // External data source. `web-crawler` requires the domain to be verified on
+  // your Cloudflare account; `r2` indexes an R2 bucket you own. Omit for a
+  // "builtin"-source instance populated via uploadItem().
+  dataSource?:
+    | { type: "web-crawler"; url: string }
+    | { type: "r2"; bucket: string; prefix?: string };
 }
 
 export class AiSearch {
@@ -66,6 +71,29 @@ export class AiSearch {
     return (json.result ?? (json as unknown)) as T;
   }
 
+  async ensureNamespace(name: string): Promise<void> {
+    try {
+      await fetch(
+        `${API_BASE}/accounts/${this.cfg.accountId}/ai-search/namespaces`,
+        {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify({ name }),
+        },
+      ).then(async (res) => {
+        if (!res.ok) {
+          const body = await res.text();
+          if (!/already exists|409|conflict/i.test(body)) {
+            throw new Error(`ensureNamespace ${name}: ${res.status} ${body}`);
+          }
+        }
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/already exists|409|conflict/i.test(msg)) throw err;
+    }
+  }
+
   async createInstance(id: string, opts: InstanceCreateOptions = {}): Promise<void> {
     const body: Record<string, unknown> = {
       id,
@@ -75,10 +103,17 @@ export class AiSearch {
       body.indexing_options = { keyword_tokenizer: opts.keywordTokenizer };
     }
     if (opts.reranking) {
-      body.reranking = { enabled: true };
+      body.reranking = true;
     }
-    if (opts.website) {
-      body.data_sources = [{ type: "website", url: opts.website.url }];
+    if (opts.dataSource) {
+      if (opts.dataSource.type === "web-crawler") {
+        body.type = "web-crawler";
+        body.source = opts.dataSource.url;
+      } else {
+        body.type = "r2";
+        body.source = opts.dataSource.bucket;
+        if (opts.dataSource.prefix) body.prefix = opts.dataSource.prefix;
+      }
     }
     await this.request("/instances", {
       method: "POST",

@@ -19,6 +19,9 @@ async function main() {
 
   const client = new AiSearch({ accountId, apiToken, namespace });
 
+  console.log(`Ensuring namespace "${namespace}"…`);
+  await client.ensureNamespace(namespace);
+
   console.log(`Ensuring content instance "${contentInstance}"…`);
   await client.ensureInstance(contentInstance, {
     indexMethod: { keyword: true, vector: true },
@@ -26,17 +29,24 @@ async function main() {
     reranking: true,
   });
 
-  console.log(`Ensuring wpilib crawl instance "${wpilibInstance}"…`);
+  // NOTE: Cloudflare's AI Search web-crawler source requires the target
+  // domain to be a verified zone on your account. docs.wpilib.org isn't
+  // one of ours, so the crawl route is blocked for this instance. We
+  // still create an empty instance so the search code can include it in
+  // cross-instance queries once populated. Two paths to fill it:
+  //   1. Scrape docs.wpilib.org locally, upload to an R2 bucket you own,
+  //      and recreate the instance with { type: "r2", bucket: "<name>" }.
+  //   2. Scrape + call client.uploadItem(wpilibInstance, key, body, md).
+  console.log(`Ensuring (empty) wpilib instance "${wpilibInstance}"…`);
   await client.ensureInstance(wpilibInstance, {
     indexMethod: { keyword: true, vector: true },
     keywordTokenizer: "porter",
     reranking: true,
-    website: { url: "https://docs.wpilib.org/" },
   });
 
   console.log("\nDone. Next steps:");
   console.log("  1. npm run index:content   # push /src/content/docs into warbotics-content");
-  console.log("  2. Wait for the wpilib crawl to complete (check the CF dashboard).");
+  console.log("  2. Populate wpilib-docs via R2 or direct upload (see README).");
 }
 
 main().catch((err) => {

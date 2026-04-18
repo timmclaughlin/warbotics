@@ -45,19 +45,26 @@ cp .dev.vars.example .dev.vars
    - `Workers AI → AI Search → Edit`
    - `Account → Workers KV Storage → Edit`
 
-   Store both in `.dev.vars`:
-   ```
-   CLOUDFLARE_ACCOUNT_ID=...      # from the dashboard URL or `wrangler whoami`
-   CLOUDFLARE_API_TOKEN=...
-   ```
-   For production, also run `npx wrangler secret put CLOUDFLARE_API_TOKEN`.
+   Put the token in `.dev.vars` as `CLOUDFLARE_API_TOKEN=…`. The account ID is
+   already pinned in `wrangler.toml` (`e9abbdd7b6e80b20b43abe0c39a09019`).
+
+   For production: `npx wrangler secret put CLOUDFLARE_API_TOKEN`. The Worker
+   uses this secret at runtime to create per-user instances on Slack login and
+   to log search queries into the caller's personal instance.
+
+   > For one-off local bootstrap runs you can skip the token: export the
+   > wrangler OAuth token into the same var:
+   > ```sh
+   > export CLOUDFLARE_API_TOKEN=$(grep oauth_token "$HOME/Library/Preferences/.wrangler/config/default.toml" | head -1 | sed 's/.*= *//;s/"//g')
+   > ```
+   > The OAuth token is short-lived but fine for a one-time `npm run bootstrap:instances`.
 
 3. Create the shared AI Search instances:
    ```sh
    npm run bootstrap:instances
    ```
-   This creates `warbotics-content` (empty) and `wpilib-docs` (Cloudflare
-   immediately starts crawling `https://docs.wpilib.org/`).
+   This creates the `warbotics` namespace and two instances: `warbotics-content`
+   (fed by `npm run index:content`) and `wpilib-docs` (empty — see note below).
 
 4. Index the markdown in this repo into `warbotics-content`:
    ```sh
@@ -65,6 +72,15 @@ cp .dev.vars.example .dev.vars
    ```
    Re-run this whenever content changes. (You can wire it into GitHub Actions
    on pushes to `main` — see `§ Re-indexing` below.)
+
+> **wpilib-docs is empty by design.** Cloudflare AI Search's `web-crawler`
+> source only crawls domains verified on your account — `docs.wpilib.org`
+> isn't one of ours, so the crawl route is blocked. Two paths to populate it:
+>
+> - **R2 mirror**: scrape WPILib locally, upload to an R2 bucket you own,
+>   then recreate the instance with `type: "r2"`, `source: "<bucket-name>"`.
+> - **Direct upload**: scrape + `client.uploadItem(wpilibInstance, key, text, meta)`
+>   for each page. Use the same pattern as `scripts/index-content.ts`.
 
 ## 3. Slack app setup
 
