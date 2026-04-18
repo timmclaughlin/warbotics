@@ -12,19 +12,25 @@ export interface SearchConfig {
   namespace: string;
 }
 
-export interface SearchResult {
+// Shape the AI Search REST API actually returns (after we strip the
+// Cloudflare `.result` wrapper in request()).
+export interface SearchChunk {
   id: string;
+  type: string;
   score: number;
-  instance_id?: string;
-  metadata?: Record<string, unknown>;
-  snippet?: string;
-  content?: string;
-  source?: string;
+  text: string;
+  instance_id: string;
+  item?: {
+    key: string;
+    timestamp?: number;
+    metadata?: Record<string, unknown>;
+  };
+  scoring_details?: Record<string, unknown>;
 }
 
 export interface SearchResponse {
-  results: SearchResult[];
-  query: string;
+  search_query: string;
+  chunks: SearchChunk[];
 }
 
 interface InstanceCreateOptions {

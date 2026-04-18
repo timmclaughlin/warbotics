@@ -49,15 +49,19 @@ const q = Astro.url.searchParams.get("q") ?? "";
           return;
         }
         results.innerHTML = data.results
-          .map(
-            (r) => `
+          .map((r) => {
+            const titleHtml = escapeHtml(r.title ?? r.id);
+            const titleEl = r.url
+              ? `<a href="${escapeHtml(r.url)}">${titleHtml}</a>`
+              : titleHtml;
+            return `
               <div class="search-result">
-                <div class="source">${r.source ?? r.instance_id ?? ""}</div>
-                <h3 style="margin:4px 0">${escapeHtml(r.title ?? r.id)}</h3>
+                <div class="source">${escapeHtml(r.source ?? "")}${r.key ? ` · ${escapeHtml(r.key)}` : ""}</div>
+                <h3 style="margin:4px 0">${titleEl}</h3>
                 <p style="margin:0">${escapeHtml(r.snippet ?? "")}</p>
               </div>
-            `,
-          )
+            `;
+          })
           .join("");
       } catch (err) {
         results.innerHTML = `<p style="padding:16px;color:#f88">${String(err)}</p>`;

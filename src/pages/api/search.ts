@@ -3,13 +3,58 @@ import { searchClientFromEnv } from "~/lib/search";
 
 export const prerender = false;
 
+interface UiResult {
+  id: string;
+  source: string;
+  title: string;
+  snippet: string;
+  key?: string;
+  score: number;
+  url?: string;
+}
+
+function titleFromChunk(text: string, meta: Record<string, unknown> | undefined, key: string | undefined): string {
+  const metaTitle = meta?.title;
+  if (typeof metaTitle === "string" && metaTitle.trim()) return metaTitle;
+
+  // Pull the first heading-ish line from the chunk as a fallback.
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line === "---" || line.startsWith("---")) continue;
+    if (line.startsWith("#")) return line.replace(/^#+\s*/, "").slice(0, 100);
+    if (/^[A-Za-z0-9]/.test(line)) return line.slice(0, 100);
+  }
+  return key ?? "Untitled";
+}
+
+function snippetFromChunk(text: string, query: string): string {
+  // Strip frontmatter and collapse whitespace to get a readable preview.
+  const body = text.replace(/^---[\s\S]*?---\s*/, "").replace(/\s+/g, " ").trim();
+  const q = query.toLowerCase();
+  const idx = body.toLowerCase().indexOf(q);
+  const len = 240;
+  if (idx < 0) return body.slice(0, len);
+  const start = Math.max(0, idx - 80);
+  const end = Math.min(body.length, start + len);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < body.length ? "…" : "";
+  return `${prefix}${body.slice(start, end)}${suffix}`;
+}
+
+function urlForChunk(instanceId: string, key?: string, meta?: Record<string, unknown>): string | undefined {
+  if (!key) return undefined;
+  if (instanceId === "warbotics-content") {
+    const slug = typeof meta?.slug === "string" ? meta.slug : key.replace(/\.(md|mdx)$/, "");
+    return `/docs/${slug}`;
+  }
+  return undefined;
+}
+
 export const GET: APIRoute = async ({ locals, url }) => {
   const env = locals.runtime.env as Env;
   const q = url.searchParams.get("q")?.trim();
   if (!q) {
-    return new Response(JSON.stringify({ results: [] }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ query: "", results: [] });
   }
 
   const instanceIds: string[] = [];
@@ -21,8 +66,18 @@ export const GET: APIRoute = async ({ locals, url }) => {
     const client = searchClientFromEnv(env);
     const res = await client.search(q, instanceIds, { limit: 15, rerank: true });
 
-    // Best-effort log of the query into the user's personal instance so future
-    // searches can surface prior context. Non-blocking — don't slow the response.
+    const results: UiResult[] = res.chunks.map((c) => ({
+      id: c.id,
+      source: c.instance_id,
+      title: titleFromChunk(c.text, c.item?.metadata, c.item?.key),
+      snippet: snippetFromChunk(c.text, q),
+      key: c.item?.key,
+      score: c.score,
+      url: urlForChunk(c.instance_id, c.item?.key, c.item?.metadata),
+    }));
+
+    // Best-effort: log the query into the caller's personal instance so
+    // future searches can surface prior context. Non-blocking.
     if (locals.user) {
       const userInstance = locals.user.aiSearchInstanceId;
       const key = `query-${Date.now()}.md`;
@@ -39,9 +94,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
       );
     }
 
-    return new Response(JSON.stringify(res), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ query: q, results });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return new Response(msg, { status: 500 });
