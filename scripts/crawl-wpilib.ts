@@ -22,17 +22,17 @@ import { AiSearch } from "../src/lib/search.js";
 import { loadEnvFiles, requireEnv } from "./load-env.js";
 
 const CRAWL_URL = process.env.CRAWL_URL ?? "https://docs.wpilib.org/";
-const LIMIT = Number(process.env.CRAWL_LIMIT ?? "500");
+const LIMIT = Number(process.env.CRAWL_LIMIT ?? "100");
 const BUCKET = process.env.WPILIB_BUCKET ?? "warbotics-wpilib";
 const POLL_INTERVAL_MS = 15_000;
 const POLL_TIMEOUT_MS = 1000 * 60 * 45;
 
 type RawPage = {
   url?: string;
-  finalUrl?: string;
-  statusCode?: number;
-  content?: { markdown?: string; html?: string } | string;
+  status?: string;
   markdown?: string;
+  html?: string;
+  metadata?: { title?: string; status?: number; url?: string; lastModified?: string };
 };
 
 async function main() {
@@ -102,21 +102,26 @@ async function main() {
   let ok = 0;
   let failed = 0;
   for (const page of pages) {
-    const url = page.finalUrl ?? page.url;
-    const markdown = typeof page.content === "string"
-      ? page.content
-      : page.content?.markdown ?? page.markdown ?? "";
-    if (!url || !markdown) {
+    const url = page.url ?? page.metadata?.url;
+    const markdown = page.markdown ?? "";
+    if (!url || !markdown || page.status === "failed") {
       failed++;
       continue;
     }
+    const title = page.metadata?.title ?? "";
+    const body = title ? `# ${title}\n\n${markdown}` : markdown;
     const key = urlToKey(url);
     const put = await fetch(
       `${apiBase}/r2/buckets/${BUCKET}/objects/${encodeURIComponent(key)}`,
       {
         method: "PUT",
-        headers: { ...auth, "Content-Type": "text/markdown" },
-        body: markdown,
+        headers: {
+          ...auth,
+          "Content-Type": "text/markdown",
+          "X-Amz-Meta-Source-Url": url,
+          ...(title ? { "X-Amz-Meta-Title": encodeURIComponent(title) } : {}),
+        },
+        body,
       },
     );
     if (!put.ok) {
@@ -175,9 +180,10 @@ function extractStatus(body: Record<string, unknown>): string | undefined {
 function extractPages(body: Record<string, unknown>): RawPage[] | undefined {
   const result = body.result as Record<string, unknown> | undefined;
   return (
+    (result?.records as RawPage[] | undefined) ??
     (result?.pages as RawPage[] | undefined) ??
     (result?.results as RawPage[] | undefined) ??
-    (body.pages as RawPage[] | undefined)
+    (body.records as RawPage[] | undefined)
   );
 }
 
