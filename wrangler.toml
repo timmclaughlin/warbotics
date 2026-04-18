@@ -31,7 +31,7 @@ AI_SEARCH_INSTANCE_WPILIB = "wpilib-docs"
 # Slack OAuth app config. SLACK_TEAM_ID locks sign-in to a single workspace.
 SLACK_CLIENT_ID = ""
 SLACK_TEAM_ID = "TCB754LRM"
-SLACK_REDIRECT_URI = "https://warbotics.example.com/api/auth/slack/callback"
+SLACK_REDIRECT_URI = "https://warbotics.tim-e9a.workers.dev/api/auth/slack/callback"
 
 # Content source — used by scripts/index-content.ts at build/deploy time.
 CONTENT_REPO = "timmclaughlin/warbotics"
@@ -49,6 +49,13 @@ id = "d7d44dd8a2f6476c9a9e7402402e6e36"
 # binding = "WARBOTICS_SEARCH"
 # namespace_id = "REPLACE_WITH_NAMESPACE_ID"
 
-# Scheduled re-index of the content instance (daily at 09:00 UTC).
-[triggers]
-crons = ["0 9 * * *"]
+# R2 bucket holding the WPILib docs crawled by scripts/crawl-wpilib.ts.
+# Uncomment after:
+#   1. Enabling R2 on the account (dashboard → R2 → Accept terms)
+#   2. `npx wrangler r2 bucket create warbotics-wpilib`
+# The Worker itself doesn't need the binding — uploads go via the REST API
+# from the crawl script — but having it bound keeps the option open for
+# future Worker-side R2 access (e.g. serving raw source pages).
+# [[r2_buckets]]
+# binding = "WPILIB_R2"
+# bucket_name = "warbotics-wpilib"

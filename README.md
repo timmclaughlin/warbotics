@@ -73,34 +73,110 @@ cp .dev.vars.example .dev.vars
    Re-run this whenever content changes. (You can wire it into GitHub Actions
    on pushes to `main` — see `§ Re-indexing` below.)
 
-> **wpilib-docs is empty by design.** Cloudflare AI Search's `web-crawler`
-> source only crawls domains verified on your account — `docs.wpilib.org`
-> isn't one of ours, so the crawl route is blocked. Two paths to populate it:
->
-> - **R2 mirror**: scrape WPILib locally, upload to an R2 bucket you own,
->   then recreate the instance with `type: "r2"`, `source: "<bucket-name>"`.
-> - **Direct upload**: scrape + `client.uploadItem(wpilibInstance, key, text, meta)`
->   for each page. Use the same pattern as `scripts/index-content.ts`.
+### Populating `wpilib-docs` via Browser Rendering → R2
+
+Cloudflare AI Search's built-in `web-crawler` source only works on domains
+verified on your account, so `docs.wpilib.org` is blocked. We go around that
+with Browser Rendering's `/crawl` endpoint — it'll fetch WPILib for us, we
+write the markdown into an R2 bucket we own, and re-bind the AI Search
+instance to that bucket.
+
+One-time setup:
+
+1. **Enable R2** on your account at
+   <https://dash.cloudflare.com/e9abbdd7b6e80b20b43abe0c39a09019/r2> (accept
+   the billing terms — pay-as-you-go, ~free at this scale).
+2. **Create the bucket**:
+   ```sh
+   npx wrangler r2 bucket create warbotics-wpilib
+   ```
+3. **Create an API token** at <https://dash.cloudflare.com/profile/api-tokens>
+   with these permissions:
+   - `Workers AI → AI Search: Edit`
+   - `Account → Workers R2 Storage: Edit`
+   - `Account → Browser Rendering: Edit`
+
+   Put it in `.dev.vars` as `CLOUDFLARE_API_TOKEN`. (The short-lived wrangler
+   OAuth token doesn't include the Browser Rendering scope.)
+
+Then run:
+
+```sh
+npm run crawl:wpilib
+```
+
+This submits a crawl (500 pages, markdown), polls until it finishes, uploads
+each page into `r2://warbotics-wpilib/`, and recreates `wpilib-docs` as an
+R2-backed instance. Safe to re-run; each run replaces the previous contents.
+
+To crawl a different source, set `CRAWL_URL`, `CRAWL_LIMIT`, `WPILIB_BUCKET`
+env vars before running. Add more sources by making sibling `crawl-*.ts`
+scripts (or parameterize further).
 
 ## 3. Slack app setup
 
-1. Create an app at <https://api.slack.com/apps> → **From scratch**.
-2. **OAuth & Permissions** → **Redirect URLs** → add:
+This is a **"Sign in with Slack" (OIDC) app** — pure identity provider, no bot
+user, no channels, no slash commands. If you see "create a bot" instructions
+elsewhere, that's a different kind of Slack app.
+
+### Create the app
+
+1. Go to <https://api.slack.com/apps> → **Create New App** → **From scratch**.
+2. App name: `Warbotics`. Development workspace: the one matching team id
+   `TCB754LRM`.
+3. Click **Create App**.
+
+### Enable "Sign in with Slack"
+
+Slack hides the OIDC scopes behind a feature toggle. You won't see `openid`
+in the normal scope picker until you enable it.
+
+1. In the sidebar go to **OAuth & Permissions**.
+2. Scroll to **Scopes** → **User Token Scopes** → **Add an OAuth Scope** and
+   add all three:
+   - `openid`
+   - `email`
+   - `profile`
+   (If they're not in the dropdown, scroll down to **"Sign in with Slack"**
+   section and click **Add to your app** — that unlocks them.)
+3. Scroll to **Redirect URLs** → **Add New Redirect URL** → add both:
+   - `https://warbotics.tim-e9a.workers.dev/api/auth/slack/callback` (prod)
    - `http://localhost:4321/api/auth/slack/callback` (dev)
-   - `https://<your-domain>/api/auth/slack/callback` (prod)
-3. **Manage Distribution** → enable **Sign in with Slack** (OpenID Connect).
-   Required scopes: `openid`, `profile`, `email`.
-4. From **Basic Information** copy:
-   - `Client ID` → `SLACK_CLIENT_ID` (public, in `wrangler.toml [vars]`)
-   - `Client Secret` → `SLACK_CLIENT_SECRET` (secret, in `.dev.vars`)
-5. **(Optional)** Restrict sign-in to a single workspace: set `SLACK_TEAM_ID`
-   in `wrangler.toml [vars]` to your team id (`T…`). Any other workspace will
-   be rejected in the callback.
-6. Generate a session HMAC key and put it in `.dev.vars`:
-   ```sh
-   openssl rand -base64 48
-   ```
-   For production: `npx wrangler secret put SESSION_SECRET`.
+   Click **Save URLs**.
+
+### No bot, no channels
+
+- Do **not** add bot token scopes.
+- Do **not** add event subscriptions.
+- Do **not** add slash commands or interactivity.
+- Do **not** add an incoming webhook.
+
+### Install + copy credentials
+
+1. **Install App** (sidebar) → **Install to Workspace** → **Allow**.
+   You're authorizing yourself to sign in, not adding a bot.
+2. **Basic Information** → **App Credentials**:
+   - `Client ID` → paste into `wrangler.toml [vars]` under `SLACK_CLIENT_ID`
+   - `Client Secret` → `.dev.vars` as `SLACK_CLIENT_SECRET`, and for prod:
+     ```sh
+     npx wrangler secret put SLACK_CLIENT_SECRET
+     ```
+   - `Signing Secret` → same treatment for `SLACK_SIGNING_SECRET` (not
+     currently used — we don't receive Slack events — but wired for when we
+     start accepting webhooks).
+
+### Workspace lock
+
+`SLACK_TEAM_ID = "TCB754LRM"` is already set in `wrangler.toml`, so the
+callback rejects any sign-in that comes back with a different team id. No
+action needed.
+
+### Session secret
+
+Already generated in your `.dev.vars`. For prod:
+```sh
+npx wrangler secret put SESSION_SECRET    # paste the value from .dev.vars
+```
 
 ## 4. Run locally
 

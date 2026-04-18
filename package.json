@@ -11,7 +11,8 @@
     "astro": "astro",
     "typecheck": "astro check",
     "index:content": "tsx scripts/index-content.ts",
-    "bootstrap:instances": "tsx scripts/bootstrap-instances.ts"
+    "bootstrap:instances": "tsx scripts/bootstrap-instances.ts",
+    "crawl:wpilib": "tsx scripts/crawl-wpilib.ts"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.0.0",

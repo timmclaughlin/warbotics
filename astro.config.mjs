@@ -6,7 +6,7 @@ export default defineConfig({
   adapter: cloudflare({
     imageService: "compile",
   }),
-  site: "https://warbotics.example.com",
+  site: "https://warbotics.tim-e9a.workers.dev",
   markdown: {
     shikiConfig: {
       theme: "github-dark-dimmed",
