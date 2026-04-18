@@ -29,7 +29,7 @@ AI_SEARCH_INSTANCE_CONTENT = "warbotics-content"
 AI_SEARCH_INSTANCE_WPILIB = "wpilib-docs"
 
 # Slack OAuth app config. SLACK_TEAM_ID locks sign-in to a single workspace.
-SLACK_CLIENT_ID = ""
+SLACK_CLIENT_ID = "419243156871.10943866341878"
 SLACK_TEAM_ID = "TCB754LRM"
 SLACK_REDIRECT_URI = "https://warbotics.tim-e9a.workers.dev/api/auth/slack/callback"
 
