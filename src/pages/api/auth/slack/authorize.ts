@@ -18,12 +18,16 @@ export const GET: APIRoute = async ({ locals, url }) => {
   // Encode returnTo into state so the callback can bounce the user back.
   const state = `${stateRandom}.${btoa(returnTo)}`;
 
+  // When SLACK_TEAM_DOMAIN is set, the `<domain>.slack.com` host already pins
+  // the workspace — sending `team=` alongside it trips Slack's
+  // `invalid_team_for_non_distributed_app` for apps that aren't distributed.
+  // The security boundary (team match) still happens in the callback.
   const authorizeUrl = buildAuthorizeUrl({
     clientId: env.SLACK_CLIENT_ID,
     redirectUri: env.SLACK_REDIRECT_URI,
     state,
-    teamId: env.SLACK_TEAM_ID || undefined,
     teamDomain: env.SLACK_TEAM_DOMAIN || undefined,
+    teamId: env.SLACK_TEAM_DOMAIN ? undefined : env.SLACK_TEAM_ID || undefined,
   });
 
   const cookie = [
