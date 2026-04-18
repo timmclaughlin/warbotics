@@ -49,13 +49,10 @@ id = "d7d44dd8a2f6476c9a9e7402402e6e36"
 # binding = "WARBOTICS_SEARCH"
 # namespace_id = "REPLACE_WITH_NAMESPACE_ID"
 
-# R2 bucket holding the WPILib docs crawled by scripts/crawl-wpilib.ts.
-# Uncomment after:
-#   1. Enabling R2 on the account (dashboard → R2 → Accept terms)
-#   2. `npx wrangler r2 bucket create warbotics-wpilib`
-# The Worker itself doesn't need the binding — uploads go via the REST API
+# R2 bucket holding the WPILib docs (populated by scripts/crawl-wpilib.ts).
+# The Worker doesn't strictly need this binding — uploads go via the REST API
 # from the crawl script — but having it bound keeps the option open for
-# future Worker-side R2 access (e.g. serving raw source pages).
-# [[r2_buckets]]
-# binding = "WPILIB_R2"
-# bucket_name = "warbotics-wpilib"
+# future Worker-side R2 access (e.g. serving raw source pages on demand).
+[[r2_buckets]]
+binding = "WPILIB_R2"
+bucket_name = "warbotics-wpilib"
