@@ -1,0 +1,42 @@
+---
+import Base from "~/layouts/Base.astro";
+import { getCollection } from "astro:content";
+
+const docs = (await getCollection("docs", ({ data }) => !data.draft))
+  .sort((a, b) => {
+    const au = a.data.updated?.getTime() ?? 0;
+    const bu = b.data.updated?.getTime() ?? 0;
+    return bu - au;
+  })
+  .slice(0, 5);
+
+const user = Astro.locals.user;
+---
+
+<Base title="Home" description="Warbotics knowledge base">
+  <section class="card" style="margin-bottom: 24px">
+    <h1 style="margin: 0 0 8px">Warbotics</h1>
+    <p class="muted" style="margin: 0">
+      Team docs, powered by Cloudflare AI Search. Sign in with Slack for a personal
+      search instance that remembers your questions.
+    </p>
+    {!user && (
+      <p style="margin-top: 16px">
+        <a class="btn" href="/login">Sign in with Slack</a>
+      </p>
+    )}
+  </section>
+
+  <h2>Recent docs</h2>
+  <ul class="doc-list">
+    {docs.map((doc) => (
+      <li>
+        <h3><a href={`/docs/${doc.id}`}>{doc.data.title}</a></h3>
+        {doc.data.description && <p class="muted" style="margin:0">{doc.data.description}</p>}
+        <div style="margin-top: 8px">
+          {doc.data.tags.map((t) => <span class="tag">{t}</span>)}
+        </div>
+      </li>
+    ))}
+  </ul>
+</Base>

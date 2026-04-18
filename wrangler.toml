@@ -1,0 +1,55 @@
+# wrangler.toml — Cloudflare Worker config for the Astro SSR build.
+#
+# Fill the placeholder IDs after provisioning:
+#   1. `wrangler kv namespace create warbotics-sessions` → paste the returned id into SESSIONS.id
+#   2. Create the shared AI Search namespace in the dashboard (or via `wrangler ai-search` once it lands),
+#      then drop its UUID into vars.AI_SEARCH_NAMESPACE_ID.
+#   3. Create a scoped API token with "Workers AI - AI Search:Edit" and store via
+#      `wrangler secret put CLOUDFLARE_API_TOKEN`.
+
+name = "warbotics"
+main = "./dist/_worker.js/index.js"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+assets = { directory = "./dist", binding = "ASSETS" }
+
+[observability]
+enabled = true
+
+# Public, non-secret vars. Secrets (*_SECRET, tokens) go through `wrangler secret put`.
+[vars]
+# Cloudflare account + AI Search namespace. Namespace groups instances (shared + per-user).
+CLOUDFLARE_ACCOUNT_ID = ""
+AI_SEARCH_NAMESPACE = "warbotics"
+AI_SEARCH_NAMESPACE_ID = ""
+
+# Shared instance IDs — created by scripts/bootstrap-instances.ts.
+AI_SEARCH_INSTANCE_CONTENT = "warbotics-content"
+AI_SEARCH_INSTANCE_WPILIB = "wpilib-docs"
+
+# Slack OAuth app config. Leave SLACK_TEAM_ID empty to allow any workspace,
+# or set it to restrict sign-in to a single Slack team.
+SLACK_CLIENT_ID = ""
+SLACK_TEAM_ID = ""
+SLACK_REDIRECT_URI = "https://warbotics.example.com/api/auth/slack/callback"
+
+# Content source — used by scripts/index-content.ts at build/deploy time.
+CONTENT_REPO = "timmclaughlin/warbotics"
+CONTENT_BRANCH = "main"
+
+# KV namespace for signed session storage (one entry per logged-in user).
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "REPLACE_WITH_KV_ID"
+
+# AI Search binding. The binding surface is still evolving during the open beta —
+# we use the REST API in src/lib/search.ts by default, but keep the binding wired
+# so switching over is a one-line change once the SDK stabilizes.
+# [[ai_search_namespaces]]
+# binding = "WARBOTICS_SEARCH"
+# namespace_id = "REPLACE_WITH_NAMESPACE_ID"
+
+# Scheduled re-index of the content instance (daily at 09:00 UTC).
+[triggers]
+crons = ["0 9 * * *"]

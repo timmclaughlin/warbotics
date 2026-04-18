@@ -1,0 +1,19 @@
+---
+import Base from "~/layouts/Base.astro";
+
+const returnTo = Astro.url.searchParams.get("returnTo") ?? "/";
+const authorizeHref = `/api/auth/slack/authorize?returnTo=${encodeURIComponent(returnTo)}`;
+---
+
+<Base title="Sign in">
+  <section class="card" style="max-width: 480px; margin: 40px auto; text-align: center">
+    <h1>Sign in</h1>
+    <p class="muted">
+      Warbotics uses Slack for sign-in. You'll get a personal search instance that
+      indexes your questions alongside the shared team content.
+    </p>
+    <p style="margin-top: 24px">
+      <a class="btn" href={authorizeHref}>Sign in with Slack</a>
+    </p>
+  </section>
+</Base>

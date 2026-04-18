@@ -1,0 +1,12 @@
+# Copy to `.dev.vars` and fill in. `.dev.vars` is consumed by `wrangler dev`
+# and should never be committed.
+
+# Cloudflare — create a token with "Workers AI - AI Search:Edit" scope.
+CLOUDFLARE_API_TOKEN=
+
+# Slack OAuth app credentials (see README → "Slack app setup").
+SLACK_CLIENT_SECRET=
+SLACK_SIGNING_SECRET=
+
+# Session cookie HMAC key. Generate with: openssl rand -base64 48
+SESSION_SECRET=

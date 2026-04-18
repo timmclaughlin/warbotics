@@ -1,0 +1,46 @@
+---
+import "~/styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+const user = Astro.locals.user;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} — Warbotics</title>
+    {description && <meta name="description" content={description} />}
+  </head>
+  <body>
+    <header class="site">
+      <div class="inner">
+        <a class="brand" href="/">⚙ Warbotics</a>
+        <nav>
+          <a href="/docs">Docs</a>
+          <a href="/search">Search</a>
+          {user ? (
+            <>
+              <span class="muted">{user.name}</span>
+              {user.avatar && <img class="avatar" src={user.avatar} alt={user.name} />}
+              <form method="POST" action="/api/auth/logout" style="margin:0">
+                <button class="btn secondary" type="submit">Sign out</button>
+              </form>
+            </>
+          ) : (
+            <a class="btn" href="/login">Sign in with Slack</a>
+          )}
+        </nav>
+      </div>
+    </header>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>

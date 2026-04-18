@@ -1,0 +1,25 @@
+---
+import Base from "~/layouts/Base.astro";
+import { getCollection, render } from "astro:content";
+
+const slug = Astro.params.slug ?? "";
+const docs = await getCollection("docs", ({ data }) => !data.draft);
+const doc = docs.find((d) => d.id === slug);
+if (!doc) {
+  return new Response("Not found", { status: 404 });
+}
+const { Content } = await render(doc);
+---
+
+<Base title={doc.data.title} description={doc.data.description}>
+  <article class="prose">
+    <h1>{doc.data.title}</h1>
+    {doc.data.updated && (
+      <p class="muted">Updated {doc.data.updated.toISOString().slice(0, 10)}</p>
+    )}
+    <div style="margin-bottom: 16px">
+      {doc.data.tags.map((t) => <span class="tag">{t}</span>)}
+    </div>
+    <Content />
+  </article>
+</Base>

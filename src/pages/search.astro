@@ -1,0 +1,84 @@
+---
+import Base from "~/layouts/Base.astro";
+
+const user = Astro.locals.user;
+const q = Astro.url.searchParams.get("q") ?? "";
+---
+
+<Base title="Search">
+  <h1>Search</h1>
+  <p class="muted">
+    {user
+      ? `Searching shared docs, WPILib, and your personal instance (${user.aiSearchInstanceId}).`
+      : "Searching shared docs and WPILib. Sign in for personal history."}
+  </p>
+
+  <form id="search-form" method="GET" action="/search" style="margin-bottom: 24px">
+    <input
+      type="search"
+      name="q"
+      value={q}
+      autofocus
+      placeholder="Ask about robot code, WPILib, anything…"
+    />
+  </form>
+
+  <div id="results" class="card" style="padding: 0; min-height: 200px">
+    <p class="muted" style="padding: 16px">Type a query and press Enter.</p>
+  </div>
+
+  <script is:inline define:vars={{ initialQuery: q }}>
+    const form = document.getElementById("search-form");
+    const results = document.getElementById("results");
+
+    async function runSearch(query) {
+      if (!query) {
+        results.innerHTML = '<p class="muted" style="padding:16px">Type a query and press Enter.</p>';
+        return;
+      }
+      results.innerHTML = '<p class="muted" style="padding:16px">Searching…</p>';
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        if (!res.ok) {
+          results.innerHTML = `<p style="padding:16px;color:#f88">Error ${res.status}: ${await res.text()}</p>`;
+          return;
+        }
+        const data = await res.json();
+        if (!data.results?.length) {
+          results.innerHTML = '<p class="muted" style="padding:16px">No matches.</p>';
+          return;
+        }
+        results.innerHTML = data.results
+          .map(
+            (r) => `
+              <div class="search-result">
+                <div class="source">${r.source ?? r.instance_id ?? ""}</div>
+                <h3 style="margin:4px 0">${escapeHtml(r.title ?? r.id)}</h3>
+                <p style="margin:0">${escapeHtml(r.snippet ?? "")}</p>
+              </div>
+            `,
+          )
+          .join("");
+      } catch (err) {
+        results.innerHTML = `<p style="padding:16px;color:#f88">${String(err)}</p>`;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const q = new FormData(form).get("q")?.toString() ?? "";
+      const url = new URL(window.location.href);
+      url.searchParams.set("q", q);
+      window.history.replaceState(null, "", url);
+      runSearch(q);
+    });
+
+    if (initialQuery) runSearch(initialQuery);
+  </script>
+</Base>

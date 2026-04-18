@@ -1,0 +1,23 @@
+---
+import Base from "~/layouts/Base.astro";
+import { getCollection } from "astro:content";
+
+const docs = (await getCollection("docs", ({ data }) => !data.draft)).sort((a, b) =>
+  a.data.title.localeCompare(b.data.title),
+);
+---
+
+<Base title="Docs">
+  <h1>Docs</h1>
+  <ul class="doc-list">
+    {docs.map((doc) => (
+      <li>
+        <h3><a href={`/docs/${doc.id}`}>{doc.data.title}</a></h3>
+        {doc.data.description && <p class="muted" style="margin:0">{doc.data.description}</p>}
+        <div style="margin-top: 8px">
+          {doc.data.tags.map((t) => <span class="tag">{t}</span>)}
+        </div>
+      </li>
+    ))}
+  </ul>
+</Base>
