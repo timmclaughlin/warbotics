@@ -18,13 +18,11 @@ export const GET: APIRoute = async ({ locals, url }) => {
   // Encode returnTo into state so the callback can bounce the user back.
   const state = `${stateRandom}.${btoa(returnTo)}`;
 
-  // Intentionally omit `team` from the authorize URL: Slack rejects it for
-  // non-distributed apps (invalid_team_for_non_distributed_app). We still
-  // enforce the team match in the callback via SLACK_TEAM_ID.
   const authorizeUrl = buildAuthorizeUrl({
     clientId: env.SLACK_CLIENT_ID,
     redirectUri: env.SLACK_REDIRECT_URI,
     state,
+    teamId: env.SLACK_TEAM_ID || undefined,
   });
 
   const cookie = [
