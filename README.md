@@ -73,45 +73,43 @@ cp .dev.vars.example .dev.vars
    Re-run this whenever content changes. (You can wire it into GitHub Actions
    on pushes to `main` — see `§ Re-indexing` below.)
 
-### Populating `wpilib-docs` via Browser Rendering → R2
+### Populating `wpilib-docs`
 
-Cloudflare AI Search's built-in `web-crawler` source only works on domains
-verified on your account, so `docs.wpilib.org` is blocked. We go around that
-with Browser Rendering's `/crawl` endpoint — it'll fetch WPILib for us, we
-write the markdown into an R2 bucket we own, and re-bind the AI Search
-instance to that bucket.
+The AI Search `web-crawler` source only works on domains verified on your
+account. We tried Browser Rendering's `/crawl` next, but `docs.wpilib.org`
+is behind Cloudflare's own bot challenge (`__cf_chl_rt_tk` in the URL), so
+the crawler hits a 403 on the first request and never discovers links.
 
-One-time setup:
-
-1. **Enable R2** on your account at
-   <https://dash.cloudflare.com/e9abbdd7b6e80b20b43abe0c39a09019/r2> (accept
-   the billing terms — pay-as-you-go, ~free at this scale).
-2. **Create the bucket**:
-   ```sh
-   npx wrangler r2 bucket create warbotics-wpilib
-   ```
-3. **Create an API token** at <https://dash.cloudflare.com/profile/api-tokens>
-   with these permissions:
-   - `Workers AI → AI Search: Edit`
-   - `Account → Workers R2 Storage: Edit`
-   - `Account → Browser Rendering: Edit`
-
-   Put it in `.dev.vars` as `CLOUDFLARE_API_TOKEN`. (The short-lived wrangler
-   OAuth token doesn't include the Browser Rendering scope.)
-
-Then run:
+The reliable path is cloning the source repo ([wpilibsuite/frc-docs](https://github.com/wpilibsuite/frc-docs),
+440 `.rst` files under `source/`) directly and uploading into R2:
 
 ```sh
-npm run crawl:wpilib
+npm run index:wpilib
 ```
 
-This submits a crawl (500 pages, markdown), polls until it finishes, uploads
-each page into `r2://warbotics-wpilib/`, and recreates `wpilib-docs` as an
-R2-backed instance. Safe to re-run; each run replaces the previous contents.
+`scripts/index-wpilib.ts` does a shallow blobless clone, walks
+`source/**/*.{rst,md}`, and PUTs each file to `r2://warbotics-wpilib/wpilib/…`.
+The AI Search instance is bound to that bucket (`type: "r2"`), so it picks
+up new objects on its next sync (default interval 6h; the first sync after
+binding usually runs within an hour). Re-run any time to refresh.
 
-To crawl a different source, set `CRAWL_URL`, `CRAWL_LIMIT`, `WPILIB_BUCKET`
-env vars before running. Add more sources by making sibling `crawl-*.ts`
-scripts (or parameterize further).
+`scripts/crawl-wpilib.ts` is kept as a template for sources that aren't
+Cloudflare-protected — run it with `CRAWL_URL=…` to crawl a different site
+into the same bucket.
+
+### One-time prereqs
+
+1. **Enable R2** on your account at
+   <https://dash.cloudflare.com/e9abbdd7b6e80b20b43abe0c39a09019/r2>.
+2. `npx wrangler r2 bucket create warbotics-wpilib`
+3. **API token** at <https://dash.cloudflare.com/profile/api-tokens> with:
+   - `Workers AI → AI Search: Edit`
+   - `Account → Workers R2 Storage: Edit`
+   - `Account → Browser Rendering: Edit` (only needed if you re-use
+     `crawl-wpilib.ts` on another site)
+
+   Drop in `.dev.vars` as `CLOUDFLARE_API_TOKEN`, and for prod:
+   `npx wrangler secret put CLOUDFLARE_API_TOKEN`.
 
 ## 3. Slack app setup
 

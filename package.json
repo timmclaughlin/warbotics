@@ -12,6 +12,7 @@
     "typecheck": "astro check",
     "index:content": "tsx scripts/index-content.ts",
     "bootstrap:instances": "tsx scripts/bootstrap-instances.ts",
+    "index:wpilib": "tsx scripts/index-wpilib.ts",
     "crawl:wpilib": "tsx scripts/crawl-wpilib.ts"
   },
   "dependencies": {
