@@ -2,112 +2,721 @@
 import Base from "~/layouts/Base.astro";
 
 const user = Astro.locals.user;
-const q = Astro.url.searchParams.get("q") ?? "";
 ---
 
 <Base title="Search">
+  <style>
+    .chat-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 70vh;
+    }
+    .chat-log {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow-y: auto;
+      min-height: 300px;
+    }
+    .chat-bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.55;
+      word-wrap: break-word;
+    }
+    .chat-bubble .text h1,
+    .chat-bubble .text h2,
+    .chat-bubble .text h3 {
+      margin: 14px 0 6px;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .chat-bubble .text h1:first-child,
+    .chat-bubble .text h2:first-child,
+    .chat-bubble .text h3:first-child { margin-top: 0; }
+    .chat-bubble .text p { margin: 0 0 10px; }
+    .chat-bubble .text p:last-child { margin-bottom: 0; }
+    .chat-bubble .text ul,
+    .chat-bubble .text ol {
+      margin: 6px 0 10px;
+      padding-left: 22px;
+    }
+    .chat-bubble .text li { margin: 2px 0; }
+    .chat-bubble .text code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: rgba(255,255,255,0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .chat-bubble .text pre {
+      background: #0f1217;
+      padding: 10px 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    .chat-bubble .text pre code { background: transparent; padding: 0; }
+    .chat-bubble.user .text { white-space: pre-wrap; }
+    .chat-bubble.user {
+      align-self: flex-end;
+      background: var(--accent-soft);
+      color: var(--text);
+      border: 1px solid var(--accent);
+    }
+    .chat-bubble.assistant {
+      align-self: flex-start;
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .chat-bubble .role {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .tool-use {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 2px solid var(--accent);
+      margin: 4px 0;
+      border-radius: 4px;
+    }
+    .tool-use .tool-name {
+      font-weight: 600;
+      color: var(--text);
+      font-family: var(--mono);
+    }
+    .tool-use .tool-query {
+      font-style: italic;
+      color: var(--muted);
+    }
+    .tool-use .tool-query::before { content: "“"; }
+    .tool-use .tool-query::after  { content: "”"; }
+    .tool-use .tool-summary {
+      color: var(--accent);
+    }
+    .tool-use .tool-state-pending,
+    .tool-use .tool-state-calling,
+    .tool-use .tool-state-running {
+      color: var(--muted);
+      font-style: italic;
+    }
+    .tool-use .tool-state-error {
+      color: #ff7b7b;
+    }
+    .chat-compose {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .chat-compose-row {
+      display: flex;
+      gap: 8px;
+    }
+    .chat-compose-row input { flex: 1; }
+    .attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .attachments:empty { display: none; }
+    .attachment {
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+    .attachment img {
+      display: block;
+      max-width: 96px;
+      max-height: 96px;
+      object-fit: cover;
+    }
+    .attachment .remove {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      border: 0;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+    }
+    .chat-bubble .attachments-in-bubble {
+      margin-top: 6px;
+    }
+    .chat-bubble .attachments-in-bubble img {
+      max-width: 240px;
+      max-height: 240px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .chat-log.drag-over {
+      outline: 2px dashed var(--accent);
+      outline-offset: -6px;
+    }
+    .chat-empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 40px 20px;
+    }
+  </style>
+
   <h1>Search</h1>
   <p class="muted">
-    Raw keyword search across {user ? "shared docs, WPILib, and your personal notes." : "shared docs and WPILib."}
-    Ask a question (or end with "?") and I'll hand it off to <a href="/chat">Chat</a>.
+    Ask a full question (or end with "?") for an AI answer with source
+    links. Drop in just keywords for a raw search across WPILib, team
+    docs, and your personal notes. Paste/drop an image to show the bot
+    what you're seeing.
   </p>
 
-  <form id="search-form" method="GET" action="/search" style="margin-bottom: 24px" data-initial-query={q}>
-    <input
-      type="search"
-      name="q"
-      value={q}
-      autofocus
-      placeholder="Keywords — e.g. swerve odometry"
-    />
-  </form>
-
-  <div id="results" class="card" style="padding: 0; min-height: 200px">
-    <p class="muted" style="padding: 16px">Type keywords and press Enter.</p>
+  <div class="chat-shell">
+    <div
+      id="chat-log"
+      class="chat-log"
+      data-user-name={user?.name ?? "You"}
+    >
+      <div class="chat-empty">Ask, or drop in some keywords to get started.</div>
+    </div>
+    <form id="chat-form" class="chat-compose">
+      <div id="attachments" class="attachments"></div>
+      <div class="chat-compose-row">
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="Ask, search, or paste an image"
+          autocomplete="off"
+          autofocus
+        />
+        <button class="btn secondary" type="button" id="attach-btn" title="Attach image">📎</button>
+        <input type="file" id="attach-file" accept="image/*" multiple hidden />
+        <button class="btn" type="submit" id="chat-send">Send</button>
+      </div>
+    </form>
   </div>
 
   <script>
+    import { marked } from "marked";
     import { isQuestion } from "~/lib/is-question";
 
-    const form = document.getElementById("search-form") as HTMLFormElement;
-    const results = document.getElementById("results") as HTMLDivElement;
-    const initialQuery = form.dataset.initialQuery ?? "";
+    marked.setOptions({ gfm: true, breaks: true });
 
-    function handoffToChat(q: string): void {
-      window.location.href = `/chat?q=${encodeURIComponent(q)}`;
+    const log = document.getElementById("chat-log") as HTMLDivElement;
+    const form = document.getElementById("chat-form") as HTMLFormElement;
+    const input = document.getElementById("chat-input") as HTMLInputElement;
+    const send = document.getElementById("chat-send") as HTMLButtonElement;
+    const attachBtn = document.getElementById("attach-btn") as HTMLButtonElement;
+    const attachInput = document.getElementById("attach-file") as HTMLInputElement;
+    const attachmentsEl = document.getElementById("attachments") as HTMLDivElement;
+    const userName = log.dataset.userName || "You";
+
+    const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+
+    interface Part {
+      _id: string;
+      type: string;
+      text?: string;
+      state?: string;
+      mediaType?: string;
+      url?: string;
+      filename?: string;
+      toolName?: string;
+      input?: unknown;
+      output?: unknown;
+      error?: string;
+    }
+    interface Msg {
+      id: string;
+      role: "user" | "assistant";
+      parts: Part[];
     }
 
-    async function runSearch(query: string): Promise<void> {
-      if (!query) {
-        results.innerHTML = '<p class="muted" style="padding:16px">Type a query and press Enter.</p>';
-        return;
-      }
-      results.innerHTML = '<p class="muted" style="padding:16px">Searching…</p>';
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-        if (!res.ok) {
-          results.innerHTML = `<p style="padding:16px;color:#f88">Error ${res.status}: ${await res.text()}</p>`;
-          return;
-        }
-        interface Hit {
-          id: string;
-          source?: string;
-          title?: string;
-          snippet?: string;
-          key?: string;
-          url?: string;
-        }
-        const data = (await res.json()) as { results?: Hit[] };
-        if (!data.results?.length) {
-          results.innerHTML = '<p class="muted" style="padding:16px">No matches.</p>';
-          return;
-        }
-        results.innerHTML = data.results
-          .map((r) => {
-            const titleHtml = escapeHtml(r.title ?? r.id);
-            const titleEl = r.url
-              ? `<a href="${escapeHtml(r.url)}">${titleHtml}</a>`
-              : titleHtml;
-            return `
-              <div class="search-result">
-                <div class="source">${escapeHtml(r.source ?? "")}${r.key ? ` · ${escapeHtml(r.key)}` : ""}</div>
-                <h3 style="margin:4px 0">${titleEl}</h3>
-                <p style="margin:0">${escapeHtml(r.snippet ?? "")}</p>
-              </div>
-            `;
-          })
-          .join("");
-      } catch (err) {
-        results.innerHTML = `<p style="padding:16px;color:#f88">${String(err)}</p>`;
-      }
+    interface Attachment {
+      mediaType: string;
+      url: string;
+      filename: string;
+    }
+    const pendingAttachments: Attachment[] = [];
+
+    const messages: Msg[] = [];
+
+    function uid(): string {
+      return `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
 
-    function escapeHtml(s: unknown): string {
-      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    function escapeHtml(s: string): string {
+      return s.replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
       }[c] || c));
     }
 
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const q = (new FormData(form).get("q")?.toString() ?? "").trim();
-      if (!q) return;
-      if (isQuestion(q)) {
-        handoffToChat(q);
+    const TOOL_ICONS: Record<string, string> = {
+      search_team_docs: "📘",
+      search_wpilib: "📚",
+      search_my_notes: "🗒️",
+      save_note: "💾",
+    };
+
+    function extractQuery(input: unknown): string {
+      if (input && typeof input === "object" && "query" in input) {
+        const q = (input as { query?: unknown }).query;
+        if (typeof q === "string") return q;
+      }
+      if (input && typeof input === "object" && "title" in input) {
+        const t = (input as { title?: unknown }).title;
+        if (typeof t === "string") return t;
+      }
+      return "";
+    }
+
+    function summarizeOutput(output: unknown): string {
+      if (output == null) return "";
+      if (Array.isArray(output)) {
+        return `${output.length} hit${output.length === 1 ? "" : "s"}`;
+      }
+      if (typeof output === "object" && "saved" in output && (output as { saved?: boolean }).saved) {
+        return "saved";
+      }
+      return "";
+    }
+
+    function renderToolUse(t: Part): HTMLDivElement {
+      const el = document.createElement("div");
+      el.className = "tool-use";
+      const name = t.toolName ?? (t.type.replace(/^tool-/, "") || "tool");
+      const icon = TOOL_ICONS[name] ?? "🔧";
+      const state = t.state ?? "pending";
+      const query = extractQuery(t.input);
+      const summary = state === "done" ? summarizeOutput(t.output) : "";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "tool-name";
+      nameEl.textContent = `${icon} ${name}`;
+      el.appendChild(nameEl);
+
+      if (query) {
+        const qEl = document.createElement("span");
+        qEl.className = "tool-query";
+        qEl.textContent = query;
+        el.appendChild(qEl);
+      }
+
+      if (summary) {
+        const sEl = document.createElement("span");
+        sEl.className = "tool-summary";
+        sEl.textContent = summary;
+        el.appendChild(sEl);
+      } else if (state !== "done") {
+        const stEl = document.createElement("span");
+        stEl.className = `tool-state-${state}`;
+        stEl.textContent = state === "error" ? (t.error ?? "error") : `${state}…`;
+        el.appendChild(stEl);
+      }
+
+      return el;
+    }
+
+    function renderBubble(m: Msg): HTMLDivElement {
+      const text = m.parts
+        .filter((p) => p.type === "text")
+        .map((p) => p.text ?? "")
+        .join("");
+      const tools = m.parts.filter((p) => p.type.startsWith("tool-"));
+      const files = m.parts.filter(
+        (p) => p.type === "file" && typeof p.url === "string" && (p.mediaType ?? "").startsWith("image/"),
+      );
+      const bubble = document.createElement("div");
+      bubble.className = `chat-bubble ${m.role}`;
+      bubble.dataset.id = m.id;
+      const label = m.role === "user" ? escapeHtml(userName) : "Warbotics";
+      bubble.innerHTML = `<div class="role">${label}</div>`;
+      for (const t of tools) {
+        bubble.appendChild(renderToolUse(t));
+      }
+      const textEl = document.createElement("div");
+      textEl.className = "text";
+      if (m.role === "assistant" && text) {
+        // marked escapes raw HTML by default (no html: true), so <script>
+        // tags from the LLM render as literal text.
+        textEl.innerHTML = marked.parse(text) as string;
+      } else {
+        textEl.textContent = text;
+      }
+      bubble.appendChild(textEl);
+      if (files.length) {
+        const filesEl = document.createElement("div");
+        filesEl.className = "attachments-in-bubble";
+        for (const f of files) {
+          const img = document.createElement("img");
+          img.src = f.url!;
+          img.alt = f.filename ?? "attached image";
+          filesEl.appendChild(img);
+        }
+        bubble.appendChild(filesEl);
+      }
+      return bubble;
+    }
+
+    function renderAttachments(): void {
+      attachmentsEl.innerHTML = "";
+      pendingAttachments.forEach((a, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "attachment";
+        const img = document.createElement("img");
+        img.src = a.url;
+        img.alt = a.filename;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "remove";
+        btn.textContent = "×";
+        btn.title = "Remove";
+        btn.addEventListener("click", () => {
+          pendingAttachments.splice(idx, 1);
+          renderAttachments();
+        });
+        wrap.appendChild(img);
+        wrap.appendChild(btn);
+        attachmentsEl.appendChild(wrap);
+      });
+    }
+
+    function fileToDataUrl(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result ?? ""));
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(file);
+      });
+    }
+
+    async function attachImageFile(file: File): Promise<void> {
+      if (!file.type.startsWith("image/")) return;
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        alert(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB — max is ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB.`);
         return;
       }
-      const url = new URL(window.location.href);
-      url.searchParams.set("q", q);
-      window.history.replaceState(null, "", url);
-      void runSearch(q);
+      const url = await fileToDataUrl(file);
+      pendingAttachments.push({
+        mediaType: file.type,
+        url,
+        filename: file.name || `pasted-${Date.now()}.png`,
+      });
+      renderAttachments();
+    }
+
+    function render(): void {
+      log.innerHTML = "";
+      if (messages.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "chat-empty";
+        empty.textContent = "Ask, or drop in some keywords to get started.";
+        log.appendChild(empty);
+        return;
+      }
+      for (const m of messages) log.appendChild(renderBubble(m));
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function upsertMessage(id: string, patch: Partial<Msg>): Msg {
+      let m = messages.find((x) => x.id === id);
+      if (!m) {
+        m = { id, role: patch.role ?? "assistant", parts: [] };
+        messages.push(m);
+      }
+      Object.assign(m, patch);
+      render();
+      return m;
+    }
+
+    function upsertPart(messageId: string, partId: string, patch: Partial<Part>): void {
+      const m = messages.find((x) => x.id === messageId);
+      if (!m) return;
+      let p = m.parts.find((x) => x._id === partId);
+      if (!p) {
+        p = { _id: partId, type: patch.type ?? "text" };
+        m.parts.push(p);
+      }
+      Object.assign(p, patch);
+      render();
+    }
+
+    async function sendChat(userText: string): Promise<void> {
+      if (!userText.trim() && pendingAttachments.length === 0) return;
+      const parts: Part[] = [];
+      if (userText.trim()) {
+        parts.push({ _id: "u-text", type: "text", text: userText });
+      }
+      pendingAttachments.forEach((a, i) => {
+        parts.push({
+          _id: `u-file-${i}`,
+          type: "file",
+          mediaType: a.mediaType,
+          url: a.url,
+          filename: a.filename,
+        });
+      });
+      const userMsg: Msg = {
+        id: uid(),
+        role: "user",
+        parts,
+      };
+      messages.push(userMsg);
+      // Attachments are part of this message now — clear the pending tray.
+      pendingAttachments.length = 0;
+      renderAttachments();
+      render();
+
+      send.disabled = true;
+      input.value = "";
+
+      const asstId = uid();
+      upsertMessage(asstId, { role: "assistant", parts: [] });
+
+      try {
+        const res = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages }),
+        });
+        if (!res.ok || !res.body) {
+          upsertPart(asstId, "err", { type: "text", text: `Error ${res.status}: ${await res.text()}` });
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newlineIdx: number;
+          while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, newlineIdx).trim();
+            buffer = buffer.slice(newlineIdx + 1);
+            if (!line) continue;
+            const payload = line.startsWith("data: ") ? line.slice(6) : line;
+            if (payload === "[DONE]") continue;
+            try {
+              handleEvent(asstId, JSON.parse(payload));
+            } catch { /* ignore malformed lines */ }
+          }
+        }
+      } catch (err) {
+        upsertPart(asstId, "err", { type: "text", text: String(err) });
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
+    interface StreamEvent {
+      type?: string;
+      id?: string;
+      delta?: string;
+      toolCallId?: string;
+      toolName?: string;
+      name?: string;
+      state?: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    }
+
+    function handleEvent(asstId: string, event: StreamEvent): void {
+      const t = event.type;
+      if (!t) return;
+
+      if (t === "text-start") {
+        upsertPart(asstId, event.id ?? "t", { type: "text", text: "" });
+        return;
+      }
+      if (t === "text-delta") {
+        const m = messages.find((x) => x.id === asstId);
+        if (!m) return;
+        const p = m.parts.find((x) => x._id === (event.id ?? "t") && x.type === "text");
+        if (p) {
+          p.text = (p.text || "") + (event.delta ?? "");
+          render();
+        }
+        return;
+      }
+      if (t === "text-end") return;
+
+      if (t.startsWith("tool-")) {
+        const toolId = event.toolCallId ?? event.id;
+        if (!toolId) return;
+        const partId = `tool-${toolId}`;
+
+        if (t === "tool-input-start") {
+          upsertPart(asstId, partId, {
+            type: `tool-${event.toolName ?? "unknown"}`,
+            state: "calling",
+            toolName: event.toolName,
+          });
+        } else if (t === "tool-input-delta") {
+          /* ignore streaming input text */
+        } else if (t === "tool-input-available") {
+          upsertPart(asstId, partId, {
+            type: `tool-${event.toolName ?? "unknown"}`,
+            state: "running",
+            toolName: event.toolName,
+            input: event.input,
+          });
+        } else if (t === "tool-output-available" || t === "tool-result") {
+          upsertPart(asstId, partId, { state: "done", output: event.output });
+        } else if (t === "tool-output-error" || t === "tool-input-error") {
+          upsertPart(asstId, partId, { state: "error", error: event.errorText ?? "error" });
+        }
+      }
+    }
+
+    interface SearchHit {
+      id: string;
+      source: string;
+      title: string;
+      snippet: string;
+      url?: string;
+      key?: string;
+    }
+
+    async function sendSearch(userText: string): Promise<void> {
+      const asstId = uid();
+      upsertMessage(asstId, { role: "assistant", parts: [] });
+      upsertPart(asstId, "search", {
+        type: "text",
+        text: `**Keyword search: "${userText}"**\n\n_searching…_`,
+      });
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(userText)}`);
+        if (!res.ok) {
+          upsertPart(asstId, "search", {
+            type: "text",
+            text: `Search error ${res.status}: ${await res.text()}`,
+          });
+          return;
+        }
+        const data = (await res.json()) as { results: SearchHit[] };
+        const lines = [`**Keyword search: "${userText}"**`, ""];
+        if (!data.results.length) {
+          lines.push("_No matches in the indexed docs. Try phrasing it as a question instead._");
+        } else {
+          for (const r of data.results.slice(0, 10)) {
+            const link = r.url
+              ? `[${r.title || r.key || r.id}](${r.url})`
+              : `\`${r.title || r.key || r.id}\``;
+            const tag = r.source === "wpilib-docs" ? "WPILib" : r.source === "warbotics-content" ? "Team" : "Notes";
+            lines.push(`- **${tag}** · ${link}  \n  ${r.snippet}`);
+          }
+        }
+        upsertPart(asstId, "search", { type: "text", text: lines.join("\n") });
+      } catch (err) {
+        upsertPart(asstId, "search", {
+          type: "text",
+          text: `Search failed: ${String(err)}`,
+        });
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text && pendingAttachments.length === 0) return;
+
+      // With an attachment we always go through the LLM — search can't see images.
+      if (pendingAttachments.length > 0 || isQuestion(text)) {
+        void sendChat(text);
+      } else {
+        const userMsg: Msg = {
+          id: uid(),
+          role: "user",
+          parts: [{ _id: "u0", type: "text", text }],
+        };
+        messages.push(userMsg);
+        render();
+        send.disabled = true;
+        input.value = "";
+        void sendSearch(text);
+      }
     });
 
-    if (initialQuery) {
-      if (isQuestion(initialQuery)) {
-        handoffToChat(initialQuery);
-      } else {
-        void runSearch(initialQuery);
+    // Paste images straight from the clipboard (screenshots, copied images).
+    form.addEventListener("paste", async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imageItems = Array.from(items).filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+      if (!imageItems.length) return;
+      e.preventDefault();
+      for (const it of imageItems) {
+        const file = it.getAsFile();
+        if (file) await attachImageFile(file);
       }
+    });
+
+    // Drag-and-drop images onto the log.
+    ["dragenter", "dragover"].forEach((name) => {
+      log.addEventListener(name, (e) => {
+        const dt = (e as DragEvent).dataTransfer;
+        if (dt && Array.from(dt.types).includes("Files")) {
+          e.preventDefault();
+          log.classList.add("drag-over");
+        }
+      });
+    });
+    ["dragleave", "drop"].forEach((name) => {
+      log.addEventListener(name, () => log.classList.remove("drag-over"));
+    });
+    log.addEventListener("drop", async (e) => {
+      const files = (e as DragEvent).dataTransfer?.files;
+      if (!files?.length) return;
+      e.preventDefault();
+      for (const f of Array.from(files)) await attachImageFile(f);
+    });
+
+    // Manual 📎 button → hidden <input type="file">.
+    attachBtn.addEventListener("click", () => attachInput.click());
+    attachInput.addEventListener("change", async () => {
+      const files = attachInput.files;
+      if (!files?.length) return;
+      for (const f of Array.from(files)) await attachImageFile(f);
+      attachInput.value = "";
+    });
+
+    // Accept an initial query via ?q=… and auto-submit. Clear the param
+    // so reload doesn't duplicate.
+    const params = new URL(window.location.href).searchParams;
+    const initialQ = params.get("q")?.trim() ?? "";
+    if (initialQ) {
+      input.value = initialQ;
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("q");
+      history.replaceState(null, "", cleanUrl.toString());
+      form.requestSubmit();
     }
   </script>
 </Base>
