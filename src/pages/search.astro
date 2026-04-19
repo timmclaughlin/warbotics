@@ -191,6 +191,43 @@ const user = Astro.locals.user;
       text-align: center;
       padding: 40px 20px;
     }
+    .mode-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px;
+      margin: 0 0 16px;
+    }
+    .mode-toggle .mode-btn {
+      appearance: none;
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mode-toggle .mode-btn:hover { color: var(--text); }
+    .mode-toggle .mode-btn.active {
+      background: var(--accent);
+      color: #111;
+      font-weight: 600;
+    }
+    .mode-toggle .mode-hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
   </style>
 
   <h1>Search</h1>
@@ -200,6 +237,12 @@ const user = Astro.locals.user;
     docs, and your personal notes. Paste/drop an image to show the bot
     what you're seeing.
   </p>
+
+  <div class="mode-toggle" role="tablist" aria-label="Mode">
+    <button class="mode-btn" data-mode="search" type="button" role="tab" aria-selected="true">🔎 Search</button>
+    <button class="mode-btn" data-mode="chat" type="button" role="tab" aria-selected="false">💬 Chat</button>
+    <span class="mode-hint" id="mode-hint">auto</span>
+  </div>
 
   <div class="chat-shell">
     <div
@@ -239,7 +282,52 @@ const user = Astro.locals.user;
     const attachBtn = document.getElementById("attach-btn") as HTMLButtonElement;
     const attachInput = document.getElementById("attach-file") as HTMLInputElement;
     const attachmentsEl = document.getElementById("attachments") as HTMLDivElement;
+    const modeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".mode-btn"));
+    const modeHint = document.getElementById("mode-hint") as HTMLSpanElement;
     const userName = log.dataset.userName || "You";
+
+    // Mode state. `manualMode` is set when the user clicks a toggle or once
+    // a chat turn has happened; otherwise the effective mode comes from the
+    // heuristic (question-shape + image attachment).
+    type Mode = "chat" | "search";
+    let manualMode: Mode | null = null;
+    let chatStarted = false;
+
+    function effectiveMode(): Mode {
+      if (manualMode) return manualMode;
+      if (chatStarted) return "chat";
+      if (pendingAttachments.length > 0) return "chat";
+      if (isQuestion(input.value)) return "chat";
+      return "search";
+    }
+
+    function refreshToggle(): void {
+      const m = effectiveMode();
+      for (const btn of modeButtons) {
+        const isActive = btn.dataset.mode === m;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-selected", String(isActive));
+      }
+      // "locked" when user has explicitly chosen OR a chat has started;
+      // "auto" when the heuristic is still deciding per message.
+      modeHint.textContent = manualMode
+        ? "locked"
+        : chatStarted
+          ? "locked (chat in progress)"
+          : "auto";
+      input.placeholder =
+        m === "chat"
+          ? "Ask anything, or paste an image"
+          : "Keywords to search — or a question to switch to chat";
+    }
+
+    for (const btn of modeButtons) {
+      btn.addEventListener("click", () => {
+        manualMode = btn.dataset.mode as Mode;
+        refreshToggle();
+        input.focus();
+      });
+    }
 
     const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 
@@ -409,6 +497,7 @@ const user = Astro.locals.user;
         wrap.appendChild(btn);
         attachmentsEl.appendChild(wrap);
       });
+      refreshToggle();
     }
 
     function fileToDataUrl(file: File): Promise<string> {
@@ -700,8 +789,10 @@ const user = Astro.locals.user;
       const text = input.value.trim();
       if (!text && pendingAttachments.length === 0) return;
 
-      // With an attachment we always go through the LLM — search can't see images.
-      if (pendingAttachments.length > 0 || isQuestion(text)) {
+      const mode = effectiveMode();
+      if (mode === "chat") {
+        chatStarted = true;
+        refreshToggle();
         void sendChat(text);
       } else {
         const userMsg: Msg = {
@@ -714,8 +805,13 @@ const user = Astro.locals.user;
         send.disabled = true;
         input.value = "";
         void sendSearch(text);
+        refreshToggle();
       }
     });
+
+    // Live-update the toggle as the user types or attaches images so they
+    // can see ahead of time which mode their next send will use.
+    input.addEventListener("input", refreshToggle);
 
     // Paste images straight from the clipboard (screenshots, copied images).
     form.addEventListener("paste", async (e: ClipboardEvent) => {
@@ -758,6 +854,9 @@ const user = Astro.locals.user;
       for (const f of Array.from(files)) await attachImageFile(f);
       attachInput.value = "";
     });
+
+    // Initial paint so the toggle reflects "auto / search" on load.
+    refreshToggle();
 
     // Accept an initial query via ?q=… and auto-submit. Clear the param
     // so reload doesn't duplicate.
