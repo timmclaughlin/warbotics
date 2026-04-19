@@ -29,9 +29,42 @@ const user = Astro.locals.user;
       padding: 10px 14px;
       border-radius: 12px;
       line-height: 1.55;
-      white-space: pre-wrap;
       word-wrap: break-word;
     }
+    .chat-bubble .text h1,
+    .chat-bubble .text h2,
+    .chat-bubble .text h3 {
+      margin: 14px 0 6px;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .chat-bubble .text h1:first-child,
+    .chat-bubble .text h2:first-child,
+    .chat-bubble .text h3:first-child { margin-top: 0; }
+    .chat-bubble .text p { margin: 0 0 10px; }
+    .chat-bubble .text p:last-child { margin-bottom: 0; }
+    .chat-bubble .text ul,
+    .chat-bubble .text ol {
+      margin: 6px 0 10px;
+      padding-left: 22px;
+    }
+    .chat-bubble .text li { margin: 2px 0; }
+    .chat-bubble .text code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: rgba(255,255,255,0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .chat-bubble .text pre {
+      background: #0f1217;
+      padding: 10px 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    .chat-bubble .text pre code { background: transparent; padding: 0; }
+    .chat-bubble.user .text { white-space: pre-wrap; }
     .chat-bubble.user {
       align-self: flex-end;
       background: var(--accent-soft);
@@ -81,7 +114,11 @@ const user = Astro.locals.user;
   </p>
 
   <div class="chat-shell">
-    <div id="chat-log" class="chat-log">
+    <div
+      id="chat-log"
+      class="chat-log"
+      data-user-name={user?.name ?? "You"}
+    >
       <div class="chat-empty">Ask a question to get started.</div>
     </div>
     <form id="chat-form" class="chat-compose">
@@ -96,31 +133,47 @@ const user = Astro.locals.user;
     </form>
   </div>
 
-  <script is:inline define:vars={{ userName: user?.name ?? "You" }}>
-    const log = document.getElementById("chat-log");
-    const form = document.getElementById("chat-form");
-    const input = document.getElementById("chat-input");
-    const send = document.getElementById("chat-send");
+  <script>
+    import { marked } from "marked";
 
-    /** @type {{id:string, role:"user"|"assistant", parts: Array<{type:string, text?:string}>}[]} */
-    const messages = [];
+    marked.setOptions({ gfm: true, breaks: true });
 
-    function uid() {
+    const log = document.getElementById("chat-log") as HTMLDivElement;
+    const form = document.getElementById("chat-form") as HTMLFormElement;
+    const input = document.getElementById("chat-input") as HTMLInputElement;
+    const send = document.getElementById("chat-send") as HTMLButtonElement;
+    const userName = log.dataset.userName || "You";
+
+    interface Part {
+      _id: string;
+      type: string;
+      text?: string;
+      state?: string;
+    }
+    interface Msg {
+      id: string;
+      role: "user" | "assistant";
+      parts: Part[];
+    }
+
+    const messages: Msg[] = [];
+
+    function uid(): string {
       return `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
 
-    function escapeHtml(s) {
-      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    function escapeHtml(s: string): string {
+      return s.replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-      })[c]);
+      }[c] || c));
     }
 
-    function renderBubble(m) {
-      const text = (m.parts || [])
+    function renderBubble(m: Msg): HTMLDivElement {
+      const text = m.parts
         .filter((p) => p.type === "text")
-        .map((p) => p.text)
+        .map((p) => p.text ?? "")
         .join("");
-      const tools = (m.parts || []).filter((p) => p.type && p.type.startsWith("tool-"));
+      const tools = m.parts.filter((p) => p.type.startsWith("tool-"));
       const bubble = document.createElement("div");
       bubble.className = `chat-bubble ${m.role}`;
       bubble.dataset.id = m.id;
@@ -136,12 +189,18 @@ const user = Astro.locals.user;
       }
       const textEl = document.createElement("div");
       textEl.className = "text";
-      textEl.textContent = text;
+      if (m.role === "assistant" && text) {
+        // marked escapes raw HTML by default (no html: true), so <script>
+        // tags from the LLM render as literal text.
+        textEl.innerHTML = marked.parse(text) as string;
+      } else {
+        textEl.textContent = text;
+      }
       bubble.appendChild(textEl);
       return bubble;
     }
 
-    function render() {
+    function render(): void {
       log.innerHTML = "";
       if (messages.length === 0) {
         const empty = document.createElement("div");
@@ -154,7 +213,7 @@ const user = Astro.locals.user;
       log.scrollTop = log.scrollHeight;
     }
 
-    function upsertMessage(id, patch) {
+    function upsertMessage(id: string, patch: Partial<Msg>): Msg {
       let m = messages.find((x) => x.id === id);
       if (!m) {
         m = { id, role: patch.role ?? "assistant", parts: [] };
@@ -165,7 +224,7 @@ const user = Astro.locals.user;
       return m;
     }
 
-    function upsertPart(messageId, partId, patch) {
+    function upsertPart(messageId: string, partId: string, patch: Partial<Part>): void {
       const m = messages.find((x) => x.id === messageId);
       if (!m) return;
       let p = m.parts.find((x) => x._id === partId);
@@ -177,12 +236,12 @@ const user = Astro.locals.user;
       render();
     }
 
-    async function send_(userText) {
+    async function sendChat(userText: string): Promise<void> {
       if (!userText.trim()) return;
-      const userMsg = {
+      const userMsg: Msg = {
         id: uid(),
         role: "user",
-        parts: [{ type: "text", text: userText }],
+        parts: [{ _id: "u0", type: "text", text: userText }],
       };
       messages.push(userMsg);
       render();
@@ -207,23 +266,20 @@ const user = Astro.locals.user;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        // Vercel AI SDK UI message stream protocol is newline-delimited JSON
-        // with `data: ` prefixes. We parse conservatively and render what we
-        // recognize; unknown event types are ignored.
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          let newlineIdx;
+          let newlineIdx: number;
           while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
             const line = buffer.slice(0, newlineIdx).trim();
             buffer = buffer.slice(newlineIdx + 1);
             if (!line) continue;
             const payload = line.startsWith("data: ") ? line.slice(6) : line;
             if (payload === "[DONE]") continue;
-            let event;
-            try { event = JSON.parse(payload); } catch { continue; }
-            handleEvent(asstId, event);
+            try {
+              handleEvent(asstId, JSON.parse(payload));
+            } catch { /* ignore malformed lines */ }
           }
         }
       } catch (err) {
@@ -234,31 +290,41 @@ const user = Astro.locals.user;
       }
     }
 
-    function handleEvent(asstId, event) {
+    interface StreamEvent {
+      type?: string;
+      id?: string;
+      delta?: string;
+      toolCallId?: string;
+      toolName?: string;
+      name?: string;
+      state?: string;
+    }
+
+    function handleEvent(asstId: string, event: StreamEvent): void {
       const t = event.type;
       if (!t) return;
-      // Text delta streaming.
       if (t === "text-start") {
-        upsertPart(asstId, event.id, { type: "text", text: "" });
+        upsertPart(asstId, event.id ?? "t", { type: "text", text: "" });
       } else if (t === "text-delta") {
         const m = messages.find((x) => x.id === asstId);
         if (!m) return;
-        const p = m.parts.find((x) => x._id === event.id && x.type === "text");
+        const p = m.parts.find((x) => x._id === (event.id ?? "t") && x.type === "text");
         if (p) {
           p.text = (p.text || "") + (event.delta ?? "");
           render();
         }
       } else if (t === "text-end") {
         /* no-op */
-      } else if (t.startsWith("tool-input-start") || t.startsWith("tool-input-available") || t.startsWith("tool-input-delta")) {
-        /* ignore input events */
+      } else if (t.startsWith("tool-input")) {
+        /* ignore input streaming events */
       } else if (t.startsWith("tool-output-available") || t === "tool-result") {
-        const name = event.toolName ?? event.name ?? (event.type ?? "").replace(/^tool-output-available-/, "").replace(/^tool-result-/, "");
+        const name =
+          event.toolName ?? event.name ?? t.replace(/^tool-output-available-?/, "").replace(/^tool-result-?/, "");
         upsertPart(asstId, `tool-${event.toolCallId ?? event.id ?? name}`, {
           type: `tool-${name}`,
           state: "done",
         });
-      } else if (t.startsWith("tool-") && !t.includes("input")) {
+      } else if (t.startsWith("tool-")) {
         const name = t.replace(/^tool-/, "");
         upsertPart(asstId, `tool-${event.toolCallId ?? event.id ?? name}`, {
           type: `tool-${name}`,
@@ -269,7 +335,7 @@ const user = Astro.locals.user;
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      send_(input.value);
+      void sendChat(input.value);
     });
   </script>
 </Base>

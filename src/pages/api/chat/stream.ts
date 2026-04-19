@@ -22,10 +22,17 @@ You have four tools:
 Rules:
 1. Before answering any factual question about WPILib or FRC, call search_wpilib.
 2. Before answering about team-specific process, call search_team_docs.
-3. When you reference source material, cite the \`key\` from the tool result.
+3. When you reference source material, cite the \`key\` from the tool result inline.
 4. If the user says "remember that …" or "save …", call save_note.
 5. If you can't find the answer in the tools, say so plainly — do not make things up.
-6. Keep responses concise by default; expand only when the user asks for detail.`;
+
+Formatting:
+- Output valid GitHub-flavored Markdown. Use real line breaks — put a blank
+  line between paragraphs, before every \`##\` heading, and before every list.
+- Never jam a heading onto the end of a previous sentence. A heading is
+  always on its own line, preceded by a blank line.
+- Use short paragraphs and bullet lists. Inline code uses backticks.
+- Keep answers focused; expand only when the user asks for more detail.`;
 
 interface ChatRequestBody {
   messages: UIMessage[];
