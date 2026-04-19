@@ -503,11 +503,54 @@ const user = Astro.locals.user;
       const asstId = uid();
       upsertMessage(asstId, { role: "assistant", parts: [] });
 
+      // The server calls convertToModelMessages() (AI SDK v6), which is
+      // strict about UIMessage shape. Our in-memory `messages` carry
+      // UI-only fields (`_id` on each part, tool parts with `state: "done"`,
+      // no `toolCallId`, etc.) that break conversion and cause the model
+      // to receive a broken history — leading to an empty response on
+      // the second+ turn. Sanitize: strip internal fields, keep only text
+      // + file parts. Tool invocations from prior turns are UI decoration;
+      // if the model needs those facts again it can re-call the tool.
+      interface OutgoingPart {
+        type: string;
+        text?: string;
+        mediaType?: string;
+        url?: string;
+        filename?: string;
+      }
+      interface OutgoingMsg {
+        id: string;
+        role: "user" | "assistant";
+        parts: OutgoingPart[];
+      }
+      const outgoing: OutgoingMsg[] = messages
+        .map((m) => {
+          const parts: OutgoingPart[] = [];
+          for (const p of m.parts) {
+            if (p.type === "text" && typeof p.text === "string" && p.text.length) {
+              parts.push({ type: "text", text: p.text });
+            } else if (
+              p.type === "file" &&
+              typeof p.url === "string" &&
+              typeof p.mediaType === "string"
+            ) {
+              parts.push({
+                type: "file",
+                mediaType: p.mediaType,
+                url: p.url,
+                filename: p.filename,
+              });
+            }
+          }
+          return { id: m.id, role: m.role, parts };
+        })
+        .filter((m) => m.parts.length > 0);
+
       try {
         const res = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages }),
+          body: JSON.stringify({ messages: outgoing }),
         });
         if (!res.ok || !res.body) {
           upsertPart(asstId, "err", { type: "text", text: `Error ${res.status}: ${await res.text()}` });
