@@ -606,10 +606,15 @@ const user = Astro.locals.user;
       const s = raw.trim();
       if (!s) return false;
       if (s.endsWith("?")) return true;
-      // Strip leading punctuation, take the first word, drop trailing 's.
-      const firstToken = s.split(/\s+/)[0].toLowerCase().replace(/[^a-z']/g, "");
-      const base = firstToken.endsWith("'s") ? firstToken.slice(0, -2) : firstToken;
-      return QUESTION_WORDS.has(firstToken) || QUESTION_WORDS.has(base);
+      // Normalize the first word: lowercase, split on apostrophes (straight
+      // AND curly — iOS/macOS auto-substitutes ' → ’), drop remaining
+      // non-letters. Then check: exact match OR without trailing "s" to
+      // handle lazy typing like "whats" or "hows".
+      const firstWord = s.split(/\s+/)[0].toLowerCase();
+      const stem = firstWord.split(/['’`]/)[0].replace(/[^a-z]/g, "");
+      if (QUESTION_WORDS.has(stem)) return true;
+      if (stem.length > 2 && stem.endsWith("s") && QUESTION_WORDS.has(stem.slice(0, -1))) return true;
+      return false;
     }
 
     interface SearchHit {
