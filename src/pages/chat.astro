@@ -593,9 +593,9 @@ const user = Astro.locals.user;
       }
     }
 
-    // Heuristic: treat as a "real question" if it ends with ?, starts with a
-    // question word, or looks like a full sentence (≥5 words). Otherwise
-    // treat it as a raw keyword search.
+    // A message is a "question" only if it ends with "?" or its first word is
+    // a question word. Length doesn't matter — short questions count, long
+    // keyword strings don't. Anything else is a raw keyword search.
     const QUESTION_WORDS = new Set([
       "what","how","why","when","where","who","which",
       "can","could","should","would","do","does","did",
@@ -606,10 +606,10 @@ const user = Astro.locals.user;
       const s = raw.trim();
       if (!s) return false;
       if (s.endsWith("?")) return true;
-      const tokens = s.split(/\s+/);
-      if (tokens.length >= 5) return true;
-      const first = tokens[0].toLowerCase().replace(/[^a-z']/g, "");
-      return QUESTION_WORDS.has(first);
+      // Strip leading punctuation, take the first word, drop trailing 's.
+      const firstToken = s.split(/\s+/)[0].toLowerCase().replace(/[^a-z']/g, "");
+      const base = firstToken.endsWith("'s") ? firstToken.slice(0, -2) : firstToken;
+      return QUESTION_WORDS.has(firstToken) || QUESTION_WORDS.has(base);
     }
 
     interface SearchHit {
