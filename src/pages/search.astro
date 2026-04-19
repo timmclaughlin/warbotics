@@ -187,33 +187,48 @@ const user = Astro.locals.user;
       outline: 2px dashed var(--accent);
       outline-offset: -6px;
     }
-    .sources {
+    details.sources {
       margin-top: 12px;
       padding-top: 10px;
       border-top: 1px dashed var(--border);
     }
-    .sources-label {
-      font-size: 10px;
+    details.sources > summary {
+      cursor: pointer;
+      font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--muted);
-      margin-bottom: 6px;
+      list-style: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+      user-select: none;
     }
-    .sources ul {
+    details.sources > summary::-webkit-details-marker { display: none; }
+    details.sources > summary::marker { content: ""; }
+    details.sources > summary::before {
+      content: "▸";
+      font-size: 10px;
+      transition: transform 0.12s ease;
+    }
+    details.sources[open] > summary::before { transform: rotate(90deg); }
+    details.sources > summary:hover { color: var(--text); }
+    details.sources ul {
       list-style: none;
       padding: 0;
-      margin: 0;
+      margin: 6px 0 0;
       display: flex;
       flex-direction: column;
       gap: 4px;
     }
-    .sources li {
+    details.sources li {
       font-size: 13px;
       display: flex;
       align-items: baseline;
       gap: 8px;
     }
-    .sources .source-tag {
+    details.sources .source-tag {
       font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -222,7 +237,7 @@ const user = Astro.locals.user;
       flex-shrink: 0;
       min-width: 48px;
     }
-    .sources a {
+    details.sources a {
       color: var(--link);
       word-break: break-word;
     }
@@ -511,14 +526,15 @@ const user = Astro.locals.user;
       return source;
     }
 
-    function renderSources(sources: SourceRef[]): HTMLDivElement | null {
+    function renderSources(sources: SourceRef[]): HTMLDetailsElement | null {
       if (!sources.length) return null;
-      const wrap = document.createElement("div");
-      wrap.className = "sources";
-      const label = document.createElement("div");
-      label.className = "sources-label";
-      label.textContent = `Sources (${sources.length})`;
-      wrap.appendChild(label);
+      const details = document.createElement("details");
+      details.className = "sources";
+      // Collapsed by default — the user sees just "Sources (N)" and can
+      // click to expand. A click anywhere in the summary toggles.
+      const summary = document.createElement("summary");
+      summary.textContent = `Sources (${sources.length})`;
+      details.appendChild(summary);
       const ul = document.createElement("ul");
       for (const s of sources) {
         const li = document.createElement("li");
@@ -534,8 +550,8 @@ const user = Astro.locals.user;
         li.appendChild(a);
         ul.appendChild(li);
       }
-      wrap.appendChild(ul);
-      return wrap;
+      details.appendChild(ul);
+      return details;
     }
 
     function renderBubble(m: Msg): HTMLDivElement {
