@@ -6,6 +6,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { AiSearch, userInstanceId } from "~/lib/search";
+import { sourceUrl } from "~/lib/urls";
 
 interface ToolContext {
   search: AiSearch;
@@ -22,6 +23,7 @@ interface ChunkSummary {
   source: string;
   key?: string;
   title?: string;
+  url?: string;
   excerpt: string;
   score: number;
 }
@@ -35,6 +37,7 @@ function summarizeChunks(chunks: Awaited<ReturnType<AiSearch["search"]>>["chunks
       source: c.instance_id,
       key: c.item?.key,
       title,
+      url: sourceUrl(c.instance_id, c.item?.key, meta),
       excerpt,
       score: c.score,
     };

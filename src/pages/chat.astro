@@ -110,7 +110,8 @@ const user = Astro.locals.user;
 
   <h1>Chat with Warbotics</h1>
   <p class="muted">
-    Ask about WPILib, FRC, or the team's own docs. I'll search across the indexed content and cite where I find answers.
+    Ask a question — I'll search WPILib + team docs and cite sources. Drop in
+    keywords instead (e.g. "swerve kinematics") and you'll get a raw search.
   </p>
 
   <div class="chat-shell">
@@ -333,9 +334,97 @@ const user = Astro.locals.user;
       }
     }
 
+    // Heuristic: treat as a "real question" if it ends with ?, starts with a
+    // question word, or looks like a full sentence (≥5 words). Otherwise
+    // treat it as a raw keyword search.
+    const QUESTION_WORDS = new Set([
+      "what","how","why","when","where","who","which",
+      "can","could","should","would","do","does","did",
+      "is","are","am","was","were","will","may","might","shall","must","have","has",
+      "tell","show","explain","help","describe","find","list","give",
+    ]);
+    function looksLikeQuestion(raw: string): boolean {
+      const s = raw.trim();
+      if (!s) return false;
+      if (s.endsWith("?")) return true;
+      const tokens = s.split(/\s+/);
+      if (tokens.length >= 5) return true;
+      const first = tokens[0].toLowerCase().replace(/[^a-z']/g, "");
+      return QUESTION_WORDS.has(first);
+    }
+
+    interface SearchHit {
+      id: string;
+      source: string;
+      title: string;
+      snippet: string;
+      url?: string;
+      key?: string;
+    }
+
+    async function sendSearch(userText: string): Promise<void> {
+      const asstId = uid();
+      upsertMessage(asstId, { role: "assistant", parts: [] });
+      upsertPart(asstId, "search", {
+        type: "text",
+        text: `**Keyword search: "${userText}"**\n\n_searching…_`,
+      });
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(userText)}`);
+        if (!res.ok) {
+          upsertPart(asstId, "search", {
+            type: "text",
+            text: `Search error ${res.status}: ${await res.text()}`,
+          });
+          return;
+        }
+        const data = (await res.json()) as { results: SearchHit[] };
+        const lines = [`**Keyword search: "${userText}"**`, ""];
+        if (!data.results.length) {
+          lines.push("_No matches in the indexed docs. Try phrasing it as a question instead._");
+        } else {
+          for (const r of data.results.slice(0, 10)) {
+            const link = r.url
+              ? `[${r.title || r.key || r.id}](${r.url})`
+              : `\`${r.title || r.key || r.id}\``;
+            const tag = r.source === "wpilib-docs" ? "WPILib" : r.source === "warbotics-content" ? "Team" : "Notes";
+            lines.push(`- **${tag}** · ${link}  \n  ${r.snippet}`);
+          }
+        }
+        upsertPart(asstId, "search", { type: "text", text: lines.join("\n") });
+      } catch (err) {
+        upsertPart(asstId, "search", {
+          type: "text",
+          text: `Search failed: ${String(err)}`,
+        });
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      void sendChat(input.value);
+      const text = input.value.trim();
+      if (!text) return;
+
+      const userMsg: Msg = {
+        id: uid(),
+        role: "user",
+        parts: [{ _id: "u0", type: "text", text }],
+      };
+      messages.push(userMsg);
+      render();
+      send.disabled = true;
+      input.value = "";
+
+      if (looksLikeQuestion(text)) {
+        // Remove the optimistic user push so sendChat can re-add via its own flow.
+        messages.pop();
+        void sendChat(text);
+      } else {
+        void sendSearch(text);
+      }
     });
   </script>
 </Base>

@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { searchClientFromEnv } from "~/lib/search";
+import { sourceUrl } from "~/lib/urls";
 
 export const prerender = false;
 
@@ -41,14 +42,6 @@ function snippetFromChunk(text: string, query: string): string {
   return `${prefix}${body.slice(start, end)}${suffix}`;
 }
 
-function urlForChunk(instanceId: string, key?: string, meta?: Record<string, unknown>): string | undefined {
-  if (!key) return undefined;
-  if (instanceId === "warbotics-content") {
-    const slug = typeof meta?.slug === "string" ? meta.slug : key.replace(/\.(md|mdx)$/, "");
-    return `/docs/${slug}`;
-  }
-  return undefined;
-}
 
 export const GET: APIRoute = async ({ locals, url }) => {
   const env = locals.runtime.env as Env;
@@ -73,7 +66,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
       snippet: snippetFromChunk(c.text, q),
       key: c.item?.key,
       score: c.score,
-      url: urlForChunk(c.instance_id, c.item?.key, c.item?.metadata),
+      url: sourceUrl(c.instance_id, c.item?.key, c.item?.metadata),
     }));
 
     // Best-effort: log the query into the caller's personal instance so
