@@ -55,6 +55,29 @@ async function pool<T, R>(items: T[], concurrency: number, fn: (x: T) => Promise
   return out;
 }
 
+// Retry `fn` up to `attempts` times with exponential + jittered backoff.
+// `fn` should throw to signal a retryable failure. The caller decides what
+// counts as retryable (e.g. wrap non-OK responses to throw).
+async function withBackoff<T>(
+  fn: () => Promise<T>,
+  attempts: number,
+  baseDelayMs: number,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt === attempts - 1) break;
+      const backoff = baseDelayMs * 2 ** attempt;
+      const jitter = Math.floor(Math.random() * (baseDelayMs / 2));
+      await new Promise((r) => setTimeout(r, backoff + jitter));
+    }
+  }
+  throw lastErr;
+}
+
 export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams> {
   async run(event: WorkflowEvent<ReindexParams>, step: WorkflowStep): Promise<unknown> {
     const { sourceId, initiatedBy } = event.payload;
@@ -134,8 +157,17 @@ export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams
         const base = `https://api.cloudflare.com/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/ai-search/namespaces/${this.env.AI_SEARCH_NAMESPACE}/instances/${encodeURIComponent(source.instance)}/items`;
         const auth = { Authorization: `Bearer ${this.env.CLOUDFLARE_API_TOKEN}` };
         const results = await pool(ids, DELETE_CONCURRENCY, async (id) => {
-          const res = await fetch(`${base}/${encodeURIComponent(id)}`, { method: "DELETE", headers: auth });
-          return res.ok;
+          try {
+            await withBackoff(async () => {
+              const res = await fetch(`${base}/${encodeURIComponent(id)}`, { method: "DELETE", headers: auth });
+              // 404 means the item is already gone — count as success.
+              if (res.status === 404) return;
+              if (!res.ok) throw new Error(`delete ${id} ${res.status}`);
+            }, 3, 300);
+            return true;
+          } catch {
+            return false;
+          }
         });
         const ok = results.filter(Boolean).length;
         return { listed: ids.length, ok, failed: results.length - ok };
@@ -154,19 +186,26 @@ export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams
         });
         const results = await pool(files, UPLOAD_CONCURRENCY, async (entry) => {
           try {
-            const raw = await fetch(`${GITHUB_RAW}/${repo}/${sha}/${entry.path}`);
-            if (!raw.ok) return false;
-            const text = await raw.text();
+            const text = await withBackoff(async () => {
+              const r = await fetch(`${GITHUB_RAW}/${repo}/${sha}/${entry.path}`);
+              if (!r.ok) throw new Error(`raw ${r.status} ${entry.path}`);
+              return await r.text();
+            }, 4, 300);
+
             const title = extractTitle(text, entry.path);
             const body = title ? `# ${title}\n\n${text}` : text;
             // Rewrite `.rst` → `.md` so AI Search treats the item as markdown.
             const key = entry.path.replace(/\.rst$/, ".md");
-            await client.uploadItem(source.instance, key, body, {
-              title,
-              source_path: entry.path,
-              source_repo: repo,
-              source_sha: sha,
-            });
+            await withBackoff(
+              () => client.uploadItem(source.instance, key, body, {
+                title,
+                source_path: entry.path,
+                source_repo: repo,
+                source_sha: sha,
+              }),
+              3,
+              400,
+            );
             return true;
           } catch {
             return false;
