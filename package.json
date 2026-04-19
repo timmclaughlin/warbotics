@@ -13,6 +13,8 @@
     "index:content": "tsx scripts/index-content.ts",
     "bootstrap:instances": "tsx scripts/bootstrap-instances.ts",
     "index:wpilib": "tsx scripts/index-wpilib.ts",
+    "sync:instance": "tsx scripts/sync-instance.ts",
+    "sync:wpilib": "tsx scripts/sync-instance.ts wpilib-docs",
     "crawl:wpilib": "tsx scripts/crawl-wpilib.ts"
   },
   "dependencies": {
