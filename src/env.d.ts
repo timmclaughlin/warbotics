@@ -10,6 +10,8 @@ interface Env {
   ASSETS: Fetcher;
   AI: Ai;
   WPILIB_R2: R2Bucket;
+  CONFIG_R2: R2Bucket;
+  OWNER_EMAIL: string;
   CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_API_TOKEN: string;
   AI_SEARCH_NAMESPACE: string;
@@ -41,5 +43,6 @@ declare namespace App {
       aiSearchInstanceId: string;
     };
     sessionId?: string;
+    isAdmin?: boolean;
   }
 }

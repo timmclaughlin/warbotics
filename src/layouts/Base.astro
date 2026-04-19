@@ -8,6 +8,7 @@ interface Props {
 
 const { title, description } = Astro.props;
 const user = Astro.locals.user;
+const isAdmin = Astro.locals.isAdmin ?? false;
 ---
 
 <!doctype html>
@@ -25,6 +26,7 @@ const user = Astro.locals.user;
         <nav>
           <a href="/docs">Docs</a>
           <a href="/search">Search</a>
+          {isAdmin && <a href="/settings" title="Settings" aria-label="Settings">⚙</a>}
           {user ? (
             <>
               <span class="muted">{user.name}</span>

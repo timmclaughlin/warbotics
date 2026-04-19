@@ -34,6 +34,11 @@ SLACK_TEAM_ID = "TCB754LRM"
 SLACK_TEAM_DOMAIN = "jmhsteam620"
 SLACK_REDIRECT_URI = "https://warbotics.tim-e9a.workers.dev/api/auth/slack/callback"
 
+# Bootstrap owner. This email is always considered an admin, even if the
+# admins list in config/config.json is empty or broken — safety net against
+# lockout. Additional admins can be added via /settings.
+OWNER_EMAIL = "tim@gotab.io"
+
 # Content source — used by scripts/index-content.ts at build/deploy time.
 CONTENT_REPO = "timmclaughlin/warbotics"
 CONTENT_BRANCH = "main"
@@ -62,3 +67,8 @@ binding = "AI"
 [[r2_buckets]]
 binding = "WPILIB_R2"
 bucket_name = "warbotics-wpilib"
+
+# Admin-editable app config (admins list + indexed sources list).
+[[r2_buckets]]
+binding = "CONFIG_R2"
+bucket_name = "warbotics-config"

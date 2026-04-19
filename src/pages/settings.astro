@@ -1,0 +1,422 @@
+---
+import Base from "~/layouts/Base.astro";
+import { isAdmin } from "~/lib/acl";
+import { loadConfig } from "~/lib/settings";
+
+const env = Astro.locals.runtime.env as Env;
+const user = Astro.locals.user;
+const config = await loadConfig(env);
+
+if (!isAdmin(user, config, env)) {
+  return new Response("Forbidden — admin-only page.", { status: 403 });
+}
+
+const initialJson = JSON.stringify(config, null, 2);
+const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase();
+---
+
+<Base title="Settings">
+  <style is:global>
+    .settings-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .settings-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .settings-card h2 {
+      margin: 0 0 4px;
+      font-size: 1rem;
+      letter-spacing: 0.01em;
+    }
+    .settings-card p.muted { margin: 0 0 14px; }
+    .admin-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin: 4px 0;
+    }
+    .admin-row input {
+      flex: 1;
+      background: transparent;
+      color: var(--text);
+      border: 0;
+      padding: 4px;
+      font: inherit;
+    }
+    .admin-row .tag-owner {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .source-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin: 6px 0;
+      align-items: start;
+    }
+    .source-row .meta {
+      display: flex;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+      flex-wrap: wrap;
+    }
+    .source-row .meta .kind {
+      color: var(--accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .source-row textarea {
+      grid-column: 2 / 4;
+      width: 100%;
+      min-height: 90px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .source-row .title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .source-row input[type="text"] {
+      flex: 1;
+      background: transparent;
+      color: var(--text);
+      border: 0;
+      font: inherit;
+      font-weight: 600;
+      padding: 2px 0;
+    }
+    .source-row input[type="checkbox"] { margin: 10px 0 0; }
+    .source-row .remove {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .source-row .remove:hover { color: #ff7b7b; border-color: #ff7b7b; }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+      align-items: center;
+    }
+    .status-msg {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status-msg.error { color: #ff7b7b; }
+    .status-msg.ok { color: #72d191; }
+    details.raw-json {
+      margin-top: 16px;
+    }
+    details.raw-json > summary {
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    details.raw-json textarea {
+      width: 100%;
+      min-height: 320px;
+      margin-top: 10px;
+      background: #0b0d11;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+  </style>
+
+  <h1>Settings</h1>
+  <p class="muted">
+    Signed in as <strong>{user?.email}</strong>{youAreOwner ? " (owner)" : ""}.
+    Changes are stored in <code>r2://warbotics-config/config.json</code>.
+  </p>
+
+  <div class="settings-shell" data-owner-email={env.OWNER_EMAIL ?? ""} data-initial={initialJson}>
+    <div class="settings-card" id="admins-card">
+      <h2>Admins</h2>
+      <p class="muted">
+        Anyone on this list (plus the bootstrap owner from <code>OWNER_EMAIL</code>)
+        can view and edit this page.
+      </p>
+      <div id="admins-list"></div>
+      <button type="button" class="btn secondary" id="add-admin">+ Add admin</button>
+    </div>
+
+    <div class="settings-card" id="sources-card">
+      <h2>Indexed sources</h2>
+      <p class="muted">
+        Each row corresponds to one AI Search instance and how it's populated.
+        Saving updates <code>config.json</code>; re-indexing still runs from
+        <code>npm run index:*</code> scripts for now.
+      </p>
+      <div id="sources-list"></div>
+      <button type="button" class="btn secondary" id="add-source">+ Add source</button>
+    </div>
+
+    <details class="raw-json">
+      <summary>▸ Edit raw JSON</summary>
+      <textarea id="raw-editor" spellcheck="false"></textarea>
+      <p class="muted" style="margin-top:6px; font-size:12px;">
+        Raw mode overrides the form on save. Use it for fields the form doesn't expose.
+      </p>
+    </details>
+
+    <div class="actions">
+      <button type="button" class="btn" id="save-btn">Save</button>
+      <button type="button" class="btn secondary" id="reset-btn">Reset</button>
+      <span class="status-msg" id="status"></span>
+    </div>
+  </div>
+
+  <script>
+    import type { AppConfig, Source } from "~/lib/settings";
+
+    const shell = document.querySelector(".settings-shell") as HTMLDivElement;
+    const initial = JSON.parse(shell.dataset.initial ?? "{}") as AppConfig;
+    const ownerEmail = (shell.dataset.ownerEmail ?? "").toLowerCase();
+
+    const adminsList = document.getElementById("admins-list") as HTMLDivElement;
+    const sourcesList = document.getElementById("sources-list") as HTMLDivElement;
+    const rawEditor = document.getElementById("raw-editor") as HTMLTextAreaElement;
+    const status = document.getElementById("status") as HTMLSpanElement;
+
+    let state: AppConfig = JSON.parse(JSON.stringify(initial));
+
+    function setStatus(text: string, kind: "" | "ok" | "error" = ""): void {
+      status.textContent = text;
+      status.className = `status-msg ${kind}`;
+    }
+
+    function renderAdmins(): void {
+      adminsList.innerHTML = "";
+      state.admins.forEach((email, idx) => {
+        const row = document.createElement("div");
+        row.className = "admin-row";
+        const input = document.createElement("input");
+        input.type = "email";
+        input.value = email;
+        input.placeholder = "someone@example.com";
+        input.addEventListener("input", () => {
+          state.admins[idx] = input.value.trim();
+          refreshRawEditor();
+        });
+        row.appendChild(input);
+        if (email.toLowerCase() === ownerEmail) {
+          const tag = document.createElement("span");
+          tag.className = "tag-owner";
+          tag.textContent = "OWNER";
+          tag.title = "Set via OWNER_EMAIL env var — always admin even if removed here.";
+          row.appendChild(tag);
+        } else {
+          const rm = document.createElement("button");
+          rm.type = "button";
+          rm.className = "remove";
+          rm.textContent = "Remove";
+          rm.addEventListener("click", () => {
+            state.admins.splice(idx, 1);
+            renderAdmins();
+            refreshRawEditor();
+          });
+          row.appendChild(rm);
+        }
+        adminsList.appendChild(row);
+      });
+    }
+
+    function renderSources(): void {
+      sourcesList.innerHTML = "";
+      state.sources.forEach((src, idx) => {
+        const row = document.createElement("div");
+        row.className = "source-row";
+
+        const enabled = document.createElement("input");
+        enabled.type = "checkbox";
+        enabled.checked = src.enabled;
+        enabled.title = "Enabled";
+        enabled.addEventListener("change", () => {
+          state.sources[idx].enabled = enabled.checked;
+          refreshRawEditor();
+        });
+        row.appendChild(enabled);
+
+        const center = document.createElement("div");
+        const titleRow = document.createElement("div");
+        titleRow.className = "title-row";
+        const label = document.createElement("input");
+        label.type = "text";
+        label.value = src.label;
+        label.placeholder = "Label";
+        label.addEventListener("input", () => {
+          state.sources[idx].label = label.value;
+          refreshRawEditor();
+        });
+        titleRow.appendChild(label);
+        center.appendChild(titleRow);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const kind = document.createElement("span");
+        kind.className = "kind";
+        kind.textContent = src.kind;
+        meta.appendChild(kind);
+        const instance = document.createElement("span");
+        instance.textContent = `→ ${src.instance}`;
+        meta.appendChild(instance);
+        const id = document.createElement("span");
+        id.textContent = `id: ${src.id}`;
+        meta.appendChild(id);
+        center.appendChild(meta);
+
+        const ta = document.createElement("textarea");
+        ta.value = JSON.stringify(src.config, null, 2);
+        ta.spellcheck = false;
+        ta.addEventListener("input", () => {
+          try {
+            state.sources[idx].config = JSON.parse(ta.value);
+            ta.style.borderColor = "";
+            refreshRawEditor();
+          } catch {
+            ta.style.borderColor = "#ff7b7b";
+          }
+        });
+
+        row.appendChild(center);
+
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "remove";
+        rm.textContent = "Remove";
+        rm.addEventListener("click", () => {
+          if (!confirm(`Remove source "${src.label}"?`)) return;
+          state.sources.splice(idx, 1);
+          renderSources();
+          refreshRawEditor();
+        });
+        row.appendChild(rm);
+
+        row.appendChild(ta);
+        sourcesList.appendChild(row);
+      });
+    }
+
+    function refreshRawEditor(): void {
+      rawEditor.value = JSON.stringify(state, null, 2);
+    }
+
+    function render(): void {
+      renderAdmins();
+      renderSources();
+      refreshRawEditor();
+    }
+
+    document.getElementById("add-admin")!.addEventListener("click", () => {
+      state.admins.push("");
+      renderAdmins();
+      refreshRawEditor();
+    });
+
+    document.getElementById("add-source")!.addEventListener("click", () => {
+      const id = `source-${Date.now()}`;
+      const next: Source = {
+        id,
+        label: "New source",
+        kind: "github",
+        instance: id,
+        enabled: true,
+        config: { repo: "owner/repo", branch: "main", sourceDir: "docs", extensions: [".md"] },
+      };
+      state.sources.push(next);
+      renderSources();
+      refreshRawEditor();
+    });
+
+    // When the user manually edits the raw JSON, feed it back into state
+    // so the form fields stay in sync on the next render.
+    rawEditor.addEventListener("input", () => {
+      try {
+        const next = JSON.parse(rawEditor.value) as AppConfig;
+        state = next;
+        rawEditor.style.borderColor = "";
+      } catch {
+        rawEditor.style.borderColor = "#ff7b7b";
+      }
+    });
+
+    document.getElementById("reset-btn")!.addEventListener("click", () => {
+      if (!confirm("Discard unsaved changes and reset to the last saved config?")) return;
+      state = JSON.parse(JSON.stringify(initial));
+      render();
+      setStatus("Reset to last saved config.");
+    });
+
+    document.getElementById("save-btn")!.addEventListener("click", async () => {
+      // Prefer the raw editor's JSON if the user touched it; otherwise serialize state.
+      const raw = rawEditor.value.trim();
+      let body: string;
+      if (raw !== JSON.stringify(state, null, 2)) {
+        try {
+          state = JSON.parse(raw) as AppConfig;
+        } catch (err) {
+          setStatus(`Invalid JSON in raw editor: ${(err as Error).message}`, "error");
+          return;
+        }
+        body = JSON.stringify(state);
+      } else {
+        body = JSON.stringify(state);
+      }
+      setStatus("Saving…");
+      try {
+        const res = await fetch("/api/settings/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        if (!res.ok) {
+          const msg = await res.text();
+          setStatus(`Save failed (${res.status}): ${msg}`, "error");
+          return;
+        }
+        const saved = (await res.json()) as AppConfig;
+        state = saved;
+        render();
+        setStatus(`Saved at ${saved.updatedAt}.`, "ok");
+      } catch (err) {
+        setStatus(`Save error: ${String(err)}`, "error");
+      }
+    });
+
+    render();
+  </script>
+</Base>
