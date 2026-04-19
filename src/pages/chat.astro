@@ -593,29 +593,7 @@ const user = Astro.locals.user;
       }
     }
 
-    // A message is a "question" only if it ends with "?" or its first word is
-    // a question word. Length doesn't matter — short questions count, long
-    // keyword strings don't. Anything else is a raw keyword search.
-    const QUESTION_WORDS = new Set([
-      "what","how","why","when","where","who","which",
-      "can","could","should","would","do","does","did",
-      "is","are","am","was","were","will","may","might","shall","must","have","has",
-      "tell","show","explain","help","describe","find","list","give",
-    ]);
-    function looksLikeQuestion(raw: string): boolean {
-      const s = raw.trim();
-      if (!s) return false;
-      if (s.endsWith("?")) return true;
-      // Normalize the first word: lowercase, split on apostrophes (straight
-      // AND curly — iOS/macOS auto-substitutes ' → ’), drop remaining
-      // non-letters. Then check: exact match OR without trailing "s" to
-      // handle lazy typing like "whats" or "hows".
-      const firstWord = s.split(/\s+/)[0].toLowerCase();
-      const stem = firstWord.split(/['’`]/)[0].replace(/[^a-z]/g, "");
-      if (QUESTION_WORDS.has(stem)) return true;
-      if (stem.length > 2 && stem.endsWith("s") && QUESTION_WORDS.has(stem.slice(0, -1))) return true;
-      return false;
-    }
+    import { isQuestion } from "~/lib/is-question";
 
     interface SearchHit {
       id: string;
@@ -673,7 +651,7 @@ const user = Astro.locals.user;
       if (!text && pendingAttachments.length === 0) return;
 
       // With an attachment we always go through the LLM — search can't see images.
-      if (pendingAttachments.length > 0 || looksLikeQuestion(text)) {
+      if (pendingAttachments.length > 0 || isQuestion(text)) {
         void sendChat(text);
       } else {
         const userMsg: Msg = {
@@ -731,5 +709,18 @@ const user = Astro.locals.user;
       for (const f of Array.from(files)) await attachImageFile(f);
       attachInput.value = "";
     });
+
+    // Accept an initial query via ?q=… (e.g. when /search hands off a
+    // question). Fill the input, clear the param from the URL so reloads
+    // don't duplicate, and submit.
+    const params = new URL(window.location.href).searchParams;
+    const initialQ = params.get("q")?.trim() ?? "";
+    if (initialQ) {
+      input.value = initialQ;
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("q");
+      history.replaceState(null, "", cleanUrl.toString());
+      form.requestSubmit();
+    }
   </script>
 </Base>

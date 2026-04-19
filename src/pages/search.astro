@@ -8,30 +8,36 @@ const q = Astro.url.searchParams.get("q") ?? "";
 <Base title="Search">
   <h1>Search</h1>
   <p class="muted">
-    {user
-      ? `Searching shared docs, WPILib, and your personal instance (${user.aiSearchInstanceId}).`
-      : "Searching shared docs and WPILib. Sign in for personal history."}
+    Raw keyword search across {user ? "shared docs, WPILib, and your personal notes." : "shared docs and WPILib."}
+    Ask a question (or end with "?") and I'll hand it off to <a href="/chat">Chat</a>.
   </p>
 
-  <form id="search-form" method="GET" action="/search" style="margin-bottom: 24px">
+  <form id="search-form" method="GET" action="/search" style="margin-bottom: 24px" data-initial-query={q}>
     <input
       type="search"
       name="q"
       value={q}
       autofocus
-      placeholder="Ask about robot code, WPILib, anything…"
+      placeholder="Keywords — e.g. swerve odometry"
     />
   </form>
 
   <div id="results" class="card" style="padding: 0; min-height: 200px">
-    <p class="muted" style="padding: 16px">Type a query and press Enter.</p>
+    <p class="muted" style="padding: 16px">Type keywords and press Enter.</p>
   </div>
 
-  <script is:inline define:vars={{ initialQuery: q }}>
-    const form = document.getElementById("search-form");
-    const results = document.getElementById("results");
+  <script>
+    import { isQuestion } from "~/lib/is-question";
 
-    async function runSearch(query) {
+    const form = document.getElementById("search-form") as HTMLFormElement;
+    const results = document.getElementById("results") as HTMLDivElement;
+    const initialQuery = form.dataset.initialQuery ?? "";
+
+    function handoffToChat(q: string): void {
+      window.location.href = `/chat?q=${encodeURIComponent(q)}`;
+    }
+
+    async function runSearch(query: string): Promise<void> {
       if (!query) {
         results.innerHTML = '<p class="muted" style="padding:16px">Type a query and press Enter.</p>';
         return;
@@ -43,7 +49,15 @@ const q = Astro.url.searchParams.get("q") ?? "";
           results.innerHTML = `<p style="padding:16px;color:#f88">Error ${res.status}: ${await res.text()}</p>`;
           return;
         }
-        const data = await res.json();
+        interface Hit {
+          id: string;
+          source?: string;
+          title?: string;
+          snippet?: string;
+          key?: string;
+          url?: string;
+        }
+        const data = (await res.json()) as { results?: Hit[] };
         if (!data.results?.length) {
           results.innerHTML = '<p class="muted" style="padding:16px">No matches.</p>';
           return;
@@ -68,21 +82,32 @@ const q = Astro.url.searchParams.get("q") ?? "";
       }
     }
 
-    function escapeHtml(s) {
+    function escapeHtml(s: unknown): string {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-      })[c]);
+      }[c] || c));
     }
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      const q = new FormData(form).get("q")?.toString() ?? "";
+      const q = (new FormData(form).get("q")?.toString() ?? "").trim();
+      if (!q) return;
+      if (isQuestion(q)) {
+        handoffToChat(q);
+        return;
+      }
       const url = new URL(window.location.href);
       url.searchParams.set("q", q);
       window.history.replaceState(null, "", url);
-      runSearch(q);
+      void runSearch(q);
     });
 
-    if (initialQuery) runSearch(initialQuery);
+    if (initialQuery) {
+      if (isQuestion(initialQuery)) {
+        handoffToChat(initialQuery);
+      } else {
+        void runSearch(initialQuery);
+      }
+    }
   </script>
 </Base>
