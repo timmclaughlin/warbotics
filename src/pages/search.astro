@@ -75,7 +75,8 @@ const user = Astro.locals.user;
     }
     .chat-bubble.user .text { white-space: pre-wrap; }
     .chat-bubble.user {
-      align-self: flex-end;
+      align-self: flex-start;
+      max-width: 100%;
       background: var(--accent-soft);
       color: var(--text);
       border: 1px solid var(--accent);
@@ -185,6 +186,45 @@ const user = Astro.locals.user;
     .chat-log.drag-over {
       outline: 2px dashed var(--accent);
       outline-offset: -6px;
+    }
+    .sources {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+    }
+    .sources-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .sources ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .sources li {
+      font-size: 13px;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .sources .source-tag {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      font-weight: 600;
+      flex-shrink: 0;
+      min-width: 48px;
+    }
+    .sources a {
+      color: var(--link);
+      word-break: break-word;
     }
     .chat-empty {
       color: var(--muted);
@@ -435,6 +475,69 @@ const user = Astro.locals.user;
       return el;
     }
 
+    interface SourceRef {
+      url: string;
+      title: string;
+      source: string;
+      key?: string;
+    }
+
+    function extractSources(parts: Part[]): SourceRef[] {
+      const seen = new Set<string>();
+      const sources: SourceRef[] = [];
+      for (const p of parts) {
+        if (!p.type.startsWith("tool-")) continue;
+        const out = p.output;
+        if (!Array.isArray(out)) continue;
+        for (const c of out as Array<Record<string, unknown>>) {
+          const url = typeof c.url === "string" ? c.url : undefined;
+          if (!url || seen.has(url)) continue;
+          seen.add(url);
+          sources.push({
+            url,
+            title: typeof c.title === "string" && c.title ? c.title : (typeof c.key === "string" ? c.key : url),
+            source: typeof c.source === "string" ? c.source : (p.toolName ?? ""),
+            key: typeof c.key === "string" ? c.key : undefined,
+          });
+        }
+      }
+      return sources;
+    }
+
+    function sourceTag(source: string): string {
+      if (source === "wpilib-docs") return "WPILib";
+      if (source === "warbotics-content") return "Team";
+      if (source.startsWith("user-")) return "Notes";
+      return source;
+    }
+
+    function renderSources(sources: SourceRef[]): HTMLDivElement | null {
+      if (!sources.length) return null;
+      const wrap = document.createElement("div");
+      wrap.className = "sources";
+      const label = document.createElement("div");
+      label.className = "sources-label";
+      label.textContent = `Sources (${sources.length})`;
+      wrap.appendChild(label);
+      const ul = document.createElement("ul");
+      for (const s of sources) {
+        const li = document.createElement("li");
+        const tag = document.createElement("span");
+        tag.className = "source-tag";
+        tag.textContent = sourceTag(s.source);
+        const a = document.createElement("a");
+        a.href = s.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = s.title;
+        li.appendChild(tag);
+        li.appendChild(a);
+        ul.appendChild(li);
+      }
+      wrap.appendChild(ul);
+      return wrap;
+    }
+
     function renderBubble(m: Msg): HTMLDivElement {
       const text = m.parts
         .filter((p) => p.type === "text")
@@ -472,6 +575,10 @@ const user = Astro.locals.user;
           filesEl.appendChild(img);
         }
         bubble.appendChild(filesEl);
+      }
+      if (m.role === "assistant") {
+        const sourcesEl = renderSources(extractSources(m.parts));
+        if (sourcesEl) bubble.appendChild(sourcesEl);
       }
       return bubble;
     }
@@ -689,6 +796,12 @@ const user = Astro.locals.user;
     function handleEvent(asstId: string, event: StreamEvent): void {
       const t = event.type;
       if (!t) return;
+
+      if (t === "error") {
+        const msg = event.errorText ?? "The model returned an error.";
+        upsertPart(asstId, "err", { type: "text", text: `**Error:** ${msg}` });
+        return;
+      }
 
       if (t === "text-start") {
         upsertPart(asstId, event.id ?? "t", { type: "text", text: "" });
