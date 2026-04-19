@@ -33,10 +33,27 @@ interface TreeEntry {
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_RAW = "https://raw.githubusercontent.com";
-// Per-file upload does TWO fetches (GitHub raw + AI Search items), so 20
-// files per batch = 40 subrequests, safely under the 50-per-step cap.
-const FILE_BATCH_SIZE = 20;
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
+// On Workers Paid we get ~10k subrequests per workflow instance, so we
+// can blow through all deletes + uploads in a couple of big parallel
+// steps instead of 40 small serial ones. Concurrency is the parallelism
+// per step — enough to keep latency low, not so high we get rate-limited.
+const DELETE_CONCURRENCY = 40;
+const UPLOAD_CONCURRENCY = 20;
+
+async function pool<T, R>(items: T[], concurrency: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
 
 export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams> {
   async run(event: WorkflowEvent<ReindexParams>, step: WorkflowStep): Promise<unknown> {
@@ -100,86 +117,67 @@ export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams
     });
 
     // Items API doesn't dedupe by key — re-uploading the same file creates
-    // a new item id, so the instance would double on every reindex. Clear
-    // existing items first. Done in batches of 40 per step to stay under
-    // the 50-subrequest-per-step budget.
-    const existingIds = await step.do("list-existing-items", async () => {
-      const client = new AiSearch({
-        accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
-        apiToken: this.env.CLOUDFLARE_API_TOKEN,
-        namespace: this.env.AI_SEARCH_NAMESPACE,
-      });
-      return client.listItemIds(source.instance);
-    });
-
-    const DELETE_BATCH = 40;
-    for (let i = 0; i < existingIds.length; i += DELETE_BATCH) {
-      const slice = existingIds.slice(i, i + DELETE_BATCH);
-      await step.do(
-        `delete-batch-${Math.floor(i / DELETE_BATCH) + 1}`,
-        { retries: { limit: 2, delay: "5 seconds", backoff: "exponential" } },
-        async () => {
-          const client = new AiSearch({
-            accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
-            apiToken: this.env.CLOUDFLARE_API_TOKEN,
-            namespace: this.env.AI_SEARCH_NAMESPACE,
-          });
-          return client.deleteItems(source.instance, slice);
-        },
-      );
-    }
+    // a new item id, so without a clear step the instance doubles on every
+    // reindex. Workers Paid lets us pack the entire clear + upload into a
+    // couple of big parallel steps, skipping the 40+ step-overhead cost.
+    const deleteStats = await step.do(
+      "clear-existing-items",
+      { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" } },
+      async (): Promise<{ listed: number; ok: number; failed: number }> => {
+        const client = new AiSearch({
+          accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+          apiToken: this.env.CLOUDFLARE_API_TOKEN,
+          namespace: this.env.AI_SEARCH_NAMESPACE,
+        });
+        const ids = await client.listItemIds(source.instance);
+        if (ids.length === 0) return { listed: 0, ok: 0, failed: 0 };
+        const base = `https://api.cloudflare.com/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/ai-search/namespaces/${this.env.AI_SEARCH_NAMESPACE}/instances/${encodeURIComponent(source.instance)}/items`;
+        const auth = { Authorization: `Bearer ${this.env.CLOUDFLARE_API_TOKEN}` };
+        const results = await pool(ids, DELETE_CONCURRENCY, async (id) => {
+          const res = await fetch(`${base}/${encodeURIComponent(id)}`, { method: "DELETE", headers: auth });
+          return res.ok;
+        });
+        const ok = results.filter(Boolean).length;
+        return { listed: ids.length, ok, failed: results.length - ok };
+      },
+    );
 
     const totalFiles = files.length;
-    const batches: Array<Array<{ path: string; sha: string; size?: number }>> = [];
-    for (let i = 0; i < files.length; i += FILE_BATCH_SIZE) {
-      batches.push(files.slice(i, i + FILE_BATCH_SIZE));
-    }
-
-    type BatchResult = { ok: number; failed: number };
-    const stats: BatchResult = { ok: 0, failed: 0 };
-
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      const res = await step.do(
-        `upload-batch-${i + 1}-of-${batches.length}`,
-        { retries: { limit: 2, delay: "5 seconds", backoff: "exponential" } },
-        async (): Promise<BatchResult> => {
-          const client = new AiSearch({
-            accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
-            apiToken: this.env.CLOUDFLARE_API_TOKEN,
-            namespace: this.env.AI_SEARCH_NAMESPACE,
-          });
-          let ok = 0;
-          let failed = 0;
-          for (const entry of batch) {
-            try {
-              const raw = await fetch(`${GITHUB_RAW}/${repo}/${sha}/${entry.path}`);
-              if (!raw.ok) {
-                failed++;
-                continue;
-              }
-              const text = await raw.text();
-              const title = extractTitle(text, entry.path);
-              const body = title ? `# ${title}\n\n${text}` : text;
-              // Rewrite `.rst` → `.md` so AI Search treats the item as markdown.
-              const key = entry.path.replace(/\.rst$/, ".md");
-              await client.uploadItem(source.instance, key, body, {
-                title,
-                source_path: entry.path,
-                source_repo: repo,
-                source_sha: sha,
-              });
-              ok++;
-            } catch {
-              failed++;
-            }
+    const uploadStats = await step.do(
+      "upload-all-files",
+      { retries: { limit: 2, delay: "10 seconds", backoff: "exponential" } },
+      async (): Promise<{ ok: number; failed: number }> => {
+        const client = new AiSearch({
+          accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+          apiToken: this.env.CLOUDFLARE_API_TOKEN,
+          namespace: this.env.AI_SEARCH_NAMESPACE,
+        });
+        const results = await pool(files, UPLOAD_CONCURRENCY, async (entry) => {
+          try {
+            const raw = await fetch(`${GITHUB_RAW}/${repo}/${sha}/${entry.path}`);
+            if (!raw.ok) return false;
+            const text = await raw.text();
+            const title = extractTitle(text, entry.path);
+            const body = title ? `# ${title}\n\n${text}` : text;
+            // Rewrite `.rst` → `.md` so AI Search treats the item as markdown.
+            const key = entry.path.replace(/\.rst$/, ".md");
+            await client.uploadItem(source.instance, key, body, {
+              title,
+              source_path: entry.path,
+              source_repo: repo,
+              source_sha: sha,
+            });
+            return true;
+          } catch {
+            return false;
           }
-          return { ok, failed };
-        },
-      );
-      stats.ok += res.ok;
-      stats.failed += res.failed;
-    }
+        });
+        const ok = results.filter(Boolean).length;
+        return { ok, failed: results.length - ok };
+      },
+    );
+
+    const stats = { ok: uploadStats.ok, failed: uploadStats.failed };
 
     await step.do("update-config", async () => {
       const current = await loadConfig(this.env);
@@ -191,7 +189,13 @@ export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams
       }
     });
 
-    return { status: "completed", sha, stats, totalFiles };
+    return {
+      status: "completed",
+      sha,
+      stats,
+      totalFiles,
+      cleared: { listed: deleteStats.listed, ok: deleteStats.ok, failed: deleteStats.failed },
+    };
   }
 }
 
