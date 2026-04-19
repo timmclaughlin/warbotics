@@ -29,8 +29,15 @@ function titleFromChunk(text: string, meta: Record<string, unknown> | undefined,
 }
 
 function snippetFromChunk(text: string, query: string): string {
-  // Strip frontmatter and collapse whitespace to get a readable preview.
-  const body = text.replace(/^---[\s\S]*?---\s*/, "").replace(/\s+/g, " ").trim();
+  // Strip frontmatter, normalize RST/Sphinx markup so marked can render
+  // code inline, then collapse whitespace for a readable preview.
+  let body = text.replace(/^---[\s\S]*?---\s*/, "");
+  body = body
+    // RST inline code: ``addPeriodic()`` → `addPeriodic()`
+    .replace(/``([^`\n]+)``/g, "`$1`")
+    // Sphinx roles: :doc:`foo`, :ref:`bar` → `foo`
+    .replace(/:[a-zA-Z-]+:`([^`]+)`/g, "`$1`");
+  body = body.replace(/\s+/g, " ").trim();
   const q = query.toLowerCase();
   const idx = body.toLowerCase().indexOf(q);
   const len = 240;

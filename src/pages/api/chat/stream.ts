@@ -45,7 +45,19 @@ Formatting:
   every list.
 - Never jam a heading onto the end of a previous sentence. A heading
   is always on its own line, preceded by a blank line.
-- Use short paragraphs and bullet lists. Inline code uses backticks.
+- Use short paragraphs and bullet lists.
+- Code formatting:
+  - Wrap class names, method calls, variable names, and file paths in
+    single backticks: \`addPeriodic()\`, \`RobotContainer\`.
+  - Wrap multi-line code in fenced blocks with a language hint so it
+    renders in a code box:
+    \`\`\`java
+    Robot robot = new Robot();
+    robot.addPeriodic(this::logStatus, 0.02);
+    \`\`\`
+  - Never emit RST double-backticks (\`\`x\`\`) or Sphinx roles (\`:doc:\`x\`\`)
+    in your own output — those are source-only markup. Convert to
+    standard markdown code spans.
 - Keep answers focused; expand only when the user asks for more detail.
 
 Images:
