@@ -6,6 +6,8 @@ import { buildAgentTools } from "~/lib/agent-tools";
 
 export const prerender = false;
 
+// Kimi K2.5 is multimodal (text + vision) + good at tool calling, so one
+// model serves both the plain-text Q&A path and the paste-an-image path.
 const MODEL_ID = "@cf/moonshotai/kimi-k2.5";
 
 const SYSTEM_PROMPT = `You are the Warbotics assistant: a robotics coach for an FRC team.
@@ -44,7 +46,14 @@ Formatting:
 - Never jam a heading onto the end of a previous sentence. A heading
   is always on its own line, preceded by a blank line.
 - Use short paragraphs and bullet lists. Inline code uses backticks.
-- Keep answers focused; expand only when the user asks for more detail.`;
+- Keep answers focused; expand only when the user asks for more detail.
+
+Images:
+- Users can paste or drop images. When an image is attached, start by
+  describing what you see (the actual hardware, wiring, screen, error,
+  code, etc.) so the user knows you saw it. Then answer their question.
+- Treat the image as authoritative context — don't contradict what's
+  visible. Still call tools to look up related WPILib / team docs.`;
 
 interface ChatRequestBody {
   messages: UIMessage[];
@@ -122,3 +131,4 @@ function extractText(m: UIMessage): string {
     .join("\n")
     .trim();
 }
+

@@ -96,10 +96,60 @@ const user = Astro.locals.user;
     }
     .chat-compose {
       display: flex;
+      flex-direction: column;
       gap: 8px;
     }
-    .chat-compose input {
-      flex: 1;
+    .chat-compose-row {
+      display: flex;
+      gap: 8px;
+    }
+    .chat-compose-row input { flex: 1; }
+    .attachments {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .attachments:empty { display: none; }
+    .attachment {
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface-2);
+    }
+    .attachment img {
+      display: block;
+      max-width: 96px;
+      max-height: 96px;
+      object-fit: cover;
+    }
+    .attachment .remove {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      border: 0;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+    }
+    .chat-bubble .attachments-in-bubble {
+      margin-top: 6px;
+    }
+    .chat-bubble .attachments-in-bubble img {
+      max-width: 240px;
+      max-height: 240px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .chat-log.drag-over {
+      outline: 2px dashed var(--accent);
+      outline-offset: -6px;
     }
     .chat-empty {
       color: var(--muted);
@@ -123,14 +173,19 @@ const user = Astro.locals.user;
       <div class="chat-empty">Ask a question to get started.</div>
     </div>
     <form id="chat-form" class="chat-compose">
-      <input
-        id="chat-input"
-        type="text"
-        placeholder="e.g. How do I set up swerve drive kinematics?"
-        autocomplete="off"
-        autofocus
-      />
-      <button class="btn" type="submit" id="chat-send">Send</button>
+      <div id="attachments" class="attachments"></div>
+      <div class="chat-compose-row">
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="Ask, or paste/drop an image (e.g. a wiring photo)"
+          autocomplete="off"
+          autofocus
+        />
+        <button class="btn secondary" type="button" id="attach-btn" title="Attach image">📎</button>
+        <input type="file" id="attach-file" accept="image/*" multiple hidden />
+        <button class="btn" type="submit" id="chat-send">Send</button>
+      </div>
     </form>
   </div>
 
@@ -143,19 +198,34 @@ const user = Astro.locals.user;
     const form = document.getElementById("chat-form") as HTMLFormElement;
     const input = document.getElementById("chat-input") as HTMLInputElement;
     const send = document.getElementById("chat-send") as HTMLButtonElement;
+    const attachBtn = document.getElementById("attach-btn") as HTMLButtonElement;
+    const attachInput = document.getElementById("attach-file") as HTMLInputElement;
+    const attachmentsEl = document.getElementById("attachments") as HTMLDivElement;
     const userName = log.dataset.userName || "You";
+
+    const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 
     interface Part {
       _id: string;
       type: string;
       text?: string;
       state?: string;
+      mediaType?: string;
+      url?: string;
+      filename?: string;
     }
     interface Msg {
       id: string;
       role: "user" | "assistant";
       parts: Part[];
     }
+
+    interface Attachment {
+      mediaType: string;
+      url: string;
+      filename: string;
+    }
+    const pendingAttachments: Attachment[] = [];
 
     const messages: Msg[] = [];
 
@@ -175,6 +245,9 @@ const user = Astro.locals.user;
         .map((p) => p.text ?? "")
         .join("");
       const tools = m.parts.filter((p) => p.type.startsWith("tool-"));
+      const files = m.parts.filter(
+        (p) => p.type === "file" && typeof p.url === "string" && (p.mediaType ?? "").startsWith("image/"),
+      );
       const bubble = document.createElement("div");
       bubble.className = `chat-bubble ${m.role}`;
       bubble.dataset.id = m.id;
@@ -198,7 +271,65 @@ const user = Astro.locals.user;
         textEl.textContent = text;
       }
       bubble.appendChild(textEl);
+      if (files.length) {
+        const filesEl = document.createElement("div");
+        filesEl.className = "attachments-in-bubble";
+        for (const f of files) {
+          const img = document.createElement("img");
+          img.src = f.url!;
+          img.alt = f.filename ?? "attached image";
+          filesEl.appendChild(img);
+        }
+        bubble.appendChild(filesEl);
+      }
       return bubble;
+    }
+
+    function renderAttachments(): void {
+      attachmentsEl.innerHTML = "";
+      pendingAttachments.forEach((a, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "attachment";
+        const img = document.createElement("img");
+        img.src = a.url;
+        img.alt = a.filename;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "remove";
+        btn.textContent = "×";
+        btn.title = "Remove";
+        btn.addEventListener("click", () => {
+          pendingAttachments.splice(idx, 1);
+          renderAttachments();
+        });
+        wrap.appendChild(img);
+        wrap.appendChild(btn);
+        attachmentsEl.appendChild(wrap);
+      });
+    }
+
+    function fileToDataUrl(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result ?? ""));
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(file);
+      });
+    }
+
+    async function attachImageFile(file: File): Promise<void> {
+      if (!file.type.startsWith("image/")) return;
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        alert(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB — max is ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB.`);
+        return;
+      }
+      const url = await fileToDataUrl(file);
+      pendingAttachments.push({
+        mediaType: file.type,
+        url,
+        filename: file.name || `pasted-${Date.now()}.png`,
+      });
+      renderAttachments();
     }
 
     function render(): void {
@@ -238,13 +369,29 @@ const user = Astro.locals.user;
     }
 
     async function sendChat(userText: string): Promise<void> {
-      if (!userText.trim()) return;
+      if (!userText.trim() && pendingAttachments.length === 0) return;
+      const parts: Part[] = [];
+      if (userText.trim()) {
+        parts.push({ _id: "u-text", type: "text", text: userText });
+      }
+      pendingAttachments.forEach((a, i) => {
+        parts.push({
+          _id: `u-file-${i}`,
+          type: "file",
+          mediaType: a.mediaType,
+          url: a.url,
+          filename: a.filename,
+        });
+      });
       const userMsg: Msg = {
         id: uid(),
         role: "user",
-        parts: [{ _id: "u0", type: "text", text: userText }],
+        parts,
       };
       messages.push(userMsg);
+      // Attachments are part of this message now — clear the pending tray.
+      pendingAttachments.length = 0;
+      renderAttachments();
       render();
 
       send.disabled = true;
@@ -406,25 +553,66 @@ const user = Astro.locals.user;
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = input.value.trim();
-      if (!text) return;
+      if (!text && pendingAttachments.length === 0) return;
 
-      const userMsg: Msg = {
-        id: uid(),
-        role: "user",
-        parts: [{ _id: "u0", type: "text", text }],
-      };
-      messages.push(userMsg);
-      render();
-      send.disabled = true;
-      input.value = "";
-
-      if (looksLikeQuestion(text)) {
-        // Remove the optimistic user push so sendChat can re-add via its own flow.
-        messages.pop();
+      // With an attachment we always go through the LLM — search can't see images.
+      if (pendingAttachments.length > 0 || looksLikeQuestion(text)) {
         void sendChat(text);
       } else {
+        const userMsg: Msg = {
+          id: uid(),
+          role: "user",
+          parts: [{ _id: "u0", type: "text", text }],
+        };
+        messages.push(userMsg);
+        render();
+        send.disabled = true;
+        input.value = "";
         void sendSearch(text);
       }
+    });
+
+    // Paste images straight from the clipboard (works for screenshots,
+    // Ctrl/Cmd+V of a copied image, etc.).
+    form.addEventListener("paste", async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imageItems = Array.from(items).filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+      if (!imageItems.length) return;
+      e.preventDefault();
+      for (const it of imageItems) {
+        const file = it.getAsFile();
+        if (file) await attachImageFile(file);
+      }
+    });
+
+    // Drag-and-drop images onto the chat log.
+    ["dragenter", "dragover"].forEach((name) => {
+      log.addEventListener(name, (e) => {
+        const dt = (e as DragEvent).dataTransfer;
+        if (dt && Array.from(dt.types).includes("Files")) {
+          e.preventDefault();
+          log.classList.add("drag-over");
+        }
+      });
+    });
+    ["dragleave", "drop"].forEach((name) => {
+      log.addEventListener(name, () => log.classList.remove("drag-over"));
+    });
+    log.addEventListener("drop", async (e) => {
+      const files = (e as DragEvent).dataTransfer?.files;
+      if (!files?.length) return;
+      e.preventDefault();
+      for (const f of Array.from(files)) await attachImageFile(f);
+    });
+
+    // Manual "attach" button → hidden <input type="file">.
+    attachBtn.addEventListener("click", () => attachInput.click());
+    attachInput.addEventListener("change", async () => {
+      const files = attachInput.files;
+      if (!files?.length) return;
+      for (const f of Array.from(files)) await attachImageFile(f);
+      attachInput.value = "";
     });
   </script>
 </Base>
