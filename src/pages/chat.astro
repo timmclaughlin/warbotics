@@ -1,0 +1,275 @@
+---
+import Base from "~/layouts/Base.astro";
+
+const user = Astro.locals.user;
+---
+
+<Base title="Chat">
+  <style>
+    .chat-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 70vh;
+    }
+    .chat-log {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow-y: auto;
+      min-height: 300px;
+    }
+    .chat-bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .chat-bubble.user {
+      align-self: flex-end;
+      background: var(--accent-soft);
+      color: var(--text);
+      border: 1px solid var(--accent);
+    }
+    .chat-bubble.assistant {
+      align-self: flex-start;
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .chat-bubble .role {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .tool-use {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border-left: 2px solid var(--accent);
+      margin: 4px 0;
+      border-radius: 4px;
+    }
+    .chat-compose {
+      display: flex;
+      gap: 8px;
+    }
+    .chat-compose input {
+      flex: 1;
+    }
+    .chat-empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 40px 20px;
+    }
+  </style>
+
+  <h1>Chat with Warbotics</h1>
+  <p class="muted">
+    Ask about WPILib, FRC, or the team's own docs. I'll search across the indexed content and cite where I find answers.
+  </p>
+
+  <div class="chat-shell">
+    <div id="chat-log" class="chat-log">
+      <div class="chat-empty">Ask a question to get started.</div>
+    </div>
+    <form id="chat-form" class="chat-compose">
+      <input
+        id="chat-input"
+        type="text"
+        placeholder="e.g. How do I set up swerve drive kinematics?"
+        autocomplete="off"
+        autofocus
+      />
+      <button class="btn" type="submit" id="chat-send">Send</button>
+    </form>
+  </div>
+
+  <script is:inline define:vars={{ userName: user?.name ?? "You" }}>
+    const log = document.getElementById("chat-log");
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("chat-input");
+    const send = document.getElementById("chat-send");
+
+    /** @type {{id:string, role:"user"|"assistant", parts: Array<{type:string, text?:string}>}[]} */
+    const messages = [];
+
+    function uid() {
+      return `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+    }
+
+    function renderBubble(m) {
+      const text = (m.parts || [])
+        .filter((p) => p.type === "text")
+        .map((p) => p.text)
+        .join("");
+      const tools = (m.parts || []).filter((p) => p.type && p.type.startsWith("tool-"));
+      const bubble = document.createElement("div");
+      bubble.className = `chat-bubble ${m.role}`;
+      bubble.dataset.id = m.id;
+      const label = m.role === "user" ? escapeHtml(userName) : "Warbotics";
+      bubble.innerHTML = `<div class="role">${label}</div>`;
+      for (const t of tools) {
+        const toolEl = document.createElement("div");
+        toolEl.className = "tool-use";
+        const name = t.type.replace(/^tool-/, "");
+        const status = t.state ?? "running";
+        toolEl.textContent = `↳ ${name} (${status})`;
+        bubble.appendChild(toolEl);
+      }
+      const textEl = document.createElement("div");
+      textEl.className = "text";
+      textEl.textContent = text;
+      bubble.appendChild(textEl);
+      return bubble;
+    }
+
+    function render() {
+      log.innerHTML = "";
+      if (messages.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "chat-empty";
+        empty.textContent = "Ask a question to get started.";
+        log.appendChild(empty);
+        return;
+      }
+      for (const m of messages) log.appendChild(renderBubble(m));
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function upsertMessage(id, patch) {
+      let m = messages.find((x) => x.id === id);
+      if (!m) {
+        m = { id, role: patch.role ?? "assistant", parts: [] };
+        messages.push(m);
+      }
+      Object.assign(m, patch);
+      render();
+      return m;
+    }
+
+    function upsertPart(messageId, partId, patch) {
+      const m = messages.find((x) => x.id === messageId);
+      if (!m) return;
+      let p = m.parts.find((x) => x._id === partId);
+      if (!p) {
+        p = { _id: partId, type: patch.type ?? "text" };
+        m.parts.push(p);
+      }
+      Object.assign(p, patch);
+      render();
+    }
+
+    async function send_(userText) {
+      if (!userText.trim()) return;
+      const userMsg = {
+        id: uid(),
+        role: "user",
+        parts: [{ type: "text", text: userText }],
+      };
+      messages.push(userMsg);
+      render();
+
+      send.disabled = true;
+      input.value = "";
+
+      const asstId = uid();
+      upsertMessage(asstId, { role: "assistant", parts: [] });
+
+      try {
+        const res = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages }),
+        });
+        if (!res.ok || !res.body) {
+          upsertPart(asstId, "err", { type: "text", text: `Error ${res.status}: ${await res.text()}` });
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        // Vercel AI SDK UI message stream protocol is newline-delimited JSON
+        // with `data: ` prefixes. We parse conservatively and render what we
+        // recognize; unknown event types are ignored.
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let newlineIdx;
+          while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, newlineIdx).trim();
+            buffer = buffer.slice(newlineIdx + 1);
+            if (!line) continue;
+            const payload = line.startsWith("data: ") ? line.slice(6) : line;
+            if (payload === "[DONE]") continue;
+            let event;
+            try { event = JSON.parse(payload); } catch { continue; }
+            handleEvent(asstId, event);
+          }
+        }
+      } catch (err) {
+        upsertPart(asstId, "err", { type: "text", text: String(err) });
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
+    function handleEvent(asstId, event) {
+      const t = event.type;
+      if (!t) return;
+      // Text delta streaming.
+      if (t === "text-start") {
+        upsertPart(asstId, event.id, { type: "text", text: "" });
+      } else if (t === "text-delta") {
+        const m = messages.find((x) => x.id === asstId);
+        if (!m) return;
+        const p = m.parts.find((x) => x._id === event.id && x.type === "text");
+        if (p) {
+          p.text = (p.text || "") + (event.delta ?? "");
+          render();
+        }
+      } else if (t === "text-end") {
+        /* no-op */
+      } else if (t.startsWith("tool-input-start") || t.startsWith("tool-input-available") || t.startsWith("tool-input-delta")) {
+        /* ignore input events */
+      } else if (t.startsWith("tool-output-available") || t === "tool-result") {
+        const name = event.toolName ?? event.name ?? (event.type ?? "").replace(/^tool-output-available-/, "").replace(/^tool-result-/, "");
+        upsertPart(asstId, `tool-${event.toolCallId ?? event.id ?? name}`, {
+          type: `tool-${name}`,
+          state: "done",
+        });
+      } else if (t.startsWith("tool-") && !t.includes("input")) {
+        const name = t.replace(/^tool-/, "");
+        upsertPart(asstId, `tool-${event.toolCallId ?? event.id ?? name}`, {
+          type: `tool-${name}`,
+          state: event.state ?? "running",
+        });
+      }
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      send_(input.value);
+    });
+  </script>
+</Base>

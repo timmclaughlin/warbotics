@@ -43,6 +43,11 @@ CONTENT_BRANCH = "main"
 binding = "SESSIONS"
 id = "d7d44dd8a2f6476c9a9e7402402e6e36"
 
+# Workers AI binding — used by the /api/chat/stream endpoint to run the
+# tool-calling LLM (default: @cf/meta/llama-3.3-70b-instruct-fp8-fast).
+[ai]
+binding = "AI"
+
 # AI Search binding. The binding surface is still evolving during the open beta —
 # we use the REST API in src/lib/search.ts by default, but keep the binding wired
 # so switching over is a one-line change once the SDK stabilizes.

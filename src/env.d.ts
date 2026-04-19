@@ -2,10 +2,14 @@
 
 type KVNamespace = import("@cloudflare/workers-types").KVNamespace;
 type Fetcher = import("@cloudflare/workers-types").Fetcher;
+type Ai = import("@cloudflare/workers-types").Ai;
+type R2Bucket = import("@cloudflare/workers-types").R2Bucket;
 
 interface Env {
   SESSIONS: KVNamespace;
   ASSETS: Fetcher;
+  AI: Ai;
+  WPILIB_R2: R2Bucket;
   CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_API_TOKEN: string;
   AI_SEARCH_NAMESPACE: string;

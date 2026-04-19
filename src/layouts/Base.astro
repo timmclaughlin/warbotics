@@ -25,6 +25,7 @@ const user = Astro.locals.user;
         <nav>
           <a href="/docs">Docs</a>
           <a href="/search">Search</a>
+          {user && <a href="/chat">Chat</a>}
           {user ? (
             <>
               <span class="muted">{user.name}</span>
