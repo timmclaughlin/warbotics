@@ -4,13 +4,14 @@ type KVNamespace = import("@cloudflare/workers-types").KVNamespace;
 type Fetcher = import("@cloudflare/workers-types").Fetcher;
 type Ai = import("@cloudflare/workers-types").Ai;
 type R2Bucket = import("@cloudflare/workers-types").R2Bucket;
+type Workflow = import("@cloudflare/workers-types").Workflow;
 
 interface Env {
   SESSIONS: KVNamespace;
   ASSETS: Fetcher;
   AI: Ai;
-  WPILIB_R2: R2Bucket;
   CONFIG_R2: R2Bucket;
+  REINDEX_WORKFLOW: Workflow;
   OWNER_EMAIL: string;
   CLOUDFLARE_ACCOUNT_ID: string;
   CLOUDFLARE_API_TOKEN: string;

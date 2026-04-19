@@ -111,7 +111,8 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
       padding: 2px 0;
     }
     .source-row input[type="checkbox"] { margin: 10px 0 0; }
-    .source-row .remove {
+    .source-row .remove,
+    .source-row .reindex {
       background: transparent;
       color: var(--muted);
       border: 1px solid var(--border);
@@ -119,8 +120,34 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
       padding: 4px 10px;
       cursor: pointer;
       font-size: 12px;
+      white-space: nowrap;
+    }
+    .source-row .reindex:hover:not(:disabled) {
+      color: var(--accent);
+      border-color: var(--accent);
     }
     .source-row .remove:hover { color: #ff7b7b; border-color: #ff7b7b; }
+    .source-row .row-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: stretch;
+    }
+    .source-row .reindex-status {
+      font-size: 11px;
+      color: var(--muted);
+      grid-column: 2 / 4;
+      margin-top: -2px;
+    }
+    .source-row .reindex-status.running { color: var(--accent); }
+    .source-row .reindex-status.errored { color: #ff7b7b; }
+    .source-row .reindex-status.complete { color: #72d191; }
+    .source-row .last-indexed {
+      grid-column: 2 / 4;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: -2px;
+    }
     .actions {
       display: flex;
       gap: 10px;
@@ -314,6 +341,23 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
 
         row.appendChild(center);
 
+        const actions = document.createElement("div");
+        actions.className = "row-actions";
+
+        const reindexBtn = document.createElement("button");
+        reindexBtn.type = "button";
+        reindexBtn.className = "reindex";
+        reindexBtn.textContent = "Reindex";
+        reindexBtn.title =
+          src.kind === "github"
+            ? `Clone ${(src.config as Record<string, unknown>).repo ?? "…"} and push each file into AI Search.`
+            : src.kind === "local-content"
+              ? "Local content is indexed by the deploy pipeline — run `npm run index:content` instead."
+              : `Reindex kind "${src.kind}" is not implemented yet.`;
+        reindexBtn.disabled = src.kind !== "github";
+        reindexBtn.addEventListener("click", () => reindexSource(src.id, row));
+        actions.appendChild(reindexBtn);
+
         const rm = document.createElement("button");
         rm.type = "button";
         rm.className = "remove";
@@ -324,7 +368,16 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
           renderSources();
           refreshRawEditor();
         });
-        row.appendChild(rm);
+        actions.appendChild(rm);
+
+        row.appendChild(actions);
+
+        if (src.lastIndexedAt) {
+          const last = document.createElement("div");
+          last.className = "last-indexed";
+          last.textContent = `Last indexed: ${new Date(src.lastIndexedAt).toLocaleString()}`;
+          row.appendChild(last);
+        }
 
         row.appendChild(ta);
         sourcesList.appendChild(row);
@@ -373,6 +426,68 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
         rawEditor.style.borderColor = "#ff7b7b";
       }
     });
+
+    async function reindexSource(sourceId: string, row: HTMLDivElement): Promise<void> {
+      const btn = row.querySelector(".reindex") as HTMLButtonElement;
+      const existing = row.querySelector(".reindex-status");
+      if (existing) existing.remove();
+      const statusEl = document.createElement("div");
+      statusEl.className = "reindex-status running";
+      statusEl.textContent = "Starting workflow…";
+      row.appendChild(statusEl);
+      btn.disabled = true;
+
+      try {
+        const kick = await fetch("/api/settings/reindex", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceId }),
+        });
+        if (!kick.ok) throw new Error(`trigger failed: ${kick.status} ${await kick.text()}`);
+        const { instanceId } = (await kick.json()) as { instanceId: string };
+        statusEl.textContent = `Running (workflow ${instanceId.slice(0, 8)}…)`;
+
+        // Poll status every 5s until terminal.
+        const terminal = new Set(["complete", "errored", "terminated"]);
+        while (true) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const res = await fetch(`/api/settings/reindex?id=${encodeURIComponent(instanceId)}`);
+          if (!res.ok) throw new Error(`status ${res.status}: ${await res.text()}`);
+          const s = (await res.json()) as {
+            status: string;
+            output?: { stats?: { ok?: number; failed?: number }; totalFiles?: number };
+            error?: unknown;
+          };
+          const state = s.status;
+          if (terminal.has(state)) {
+            statusEl.classList.remove("running");
+            if (state === "complete") {
+              statusEl.classList.add("complete");
+              const stats = s.output?.stats;
+              const total = s.output?.totalFiles;
+              const summary = stats
+                ? `${stats.ok} uploaded${stats.failed ? `, ${stats.failed} failed` : ""}`
+                : "done";
+              statusEl.textContent = `✓ Reindex complete — ${summary}${total ? ` (of ${total})` : ""}. Refresh to see the updated timestamp.`;
+            } else if (state === "errored") {
+              statusEl.classList.add("errored");
+              statusEl.textContent = `Reindex failed: ${String(s.error ?? "unknown")}`;
+            } else {
+              statusEl.classList.add("errored");
+              statusEl.textContent = `Reindex terminated.`;
+            }
+            break;
+          }
+          statusEl.textContent = `${state}…`;
+        }
+      } catch (err) {
+        statusEl.classList.remove("running");
+        statusEl.classList.add("errored");
+        statusEl.textContent = `Error: ${String(err)}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
 
     document.getElementById("reset-btn")!.addEventListener("click", () => {
       if (!confirm("Discard unsaved changes and reset to the last saved config?")) return;

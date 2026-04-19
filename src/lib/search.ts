@@ -141,6 +141,45 @@ export class AiSearch {
     await this.request(`/instances/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
+  async listItemIds(instanceId: string, limit = 200): Promise<string[]> {
+    const ids: string[] = [];
+    let page = 1;
+    while (true) {
+      const qs = new URLSearchParams({ limit: String(limit), page: String(page) });
+      const res = await fetch(
+        `${this.url(`/instances/${encodeURIComponent(instanceId)}/items`)}?${qs}`,
+        { headers: { Authorization: `Bearer ${this.cfg.apiToken}` } },
+      );
+      if (!res.ok) throw new Error(`listItemIds ${res.status}: ${await res.text()}`);
+      const body = (await res.json()) as {
+        result?: Array<{ id: string }>;
+        result_info?: { total_count?: number; count?: number };
+      };
+      const batch = body.result ?? [];
+      if (batch.length === 0) break;
+      for (const it of batch) ids.push(it.id);
+      const total = body.result_info?.total_count ?? 0;
+      if (ids.length >= total) break;
+      page++;
+      if (page > 1000) break; // safety
+    }
+    return ids;
+  }
+
+  async deleteItems(instanceId: string, ids: string[]): Promise<{ ok: number; failed: number }> {
+    let ok = 0;
+    let failed = 0;
+    for (const id of ids) {
+      const res = await fetch(
+        this.url(`/instances/${encodeURIComponent(instanceId)}/items/${encodeURIComponent(id)}`),
+        { method: "DELETE", headers: { Authorization: `Bearer ${this.cfg.apiToken}` } },
+      );
+      if (res.ok) ok++;
+      else failed++;
+    }
+    return { ok, failed };
+  }
+
   async uploadItem(
     instanceId: string,
     key: string,

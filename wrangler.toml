@@ -8,7 +8,7 @@
 #      `wrangler secret put CLOUDFLARE_API_TOKEN`.
 
 name = "warbotics"
-main = "./dist/_worker.js/index.js"
+main = "./src/worker-entry.ts"
 account_id = "e9abbdd7b6e80b20b43abe0c39a09019"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
@@ -64,11 +64,15 @@ binding = "AI"
 # The Worker doesn't strictly need this binding — uploads go via the REST API
 # from the crawl script — but having it bound keeps the option open for
 # future Worker-side R2 access (e.g. serving raw source pages on demand).
-[[r2_buckets]]
-binding = "WPILIB_R2"
-bucket_name = "warbotics-wpilib"
-
 # Admin-editable app config (admins list + indexed sources list).
 [[r2_buckets]]
 binding = "CONFIG_R2"
 bucket_name = "warbotics-config"
+
+# Cloudflare Workflow for durable reindex jobs. The class is defined in
+# src/workflows/reindex.ts and re-exported by src/worker-entry.ts so it
+# lives in the same worker as Astro.
+[[workflows]]
+name = "warbotics-reindex"
+binding = "REINDEX_WORKFLOW"
+class_name = "ReindexSourceWorkflow"

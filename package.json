@@ -14,8 +14,7 @@
     "bootstrap:instances": "tsx scripts/bootstrap-instances.ts",
     "index:wpilib": "tsx scripts/index-wpilib.ts",
     "sync:instance": "tsx scripts/sync-instance.ts",
-    "sync:wpilib": "tsx scripts/sync-instance.ts wpilib-docs",
-    "crawl:wpilib": "tsx scripts/crawl-wpilib.ts"
+    "sync:wpilib": "tsx scripts/sync-instance.ts wpilib-docs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.0.0",
