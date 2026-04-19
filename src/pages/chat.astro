@@ -85,7 +85,10 @@ const user = Astro.locals.user;
       margin-bottom: 4px;
     }
     .tool-use {
-      font-family: var(--mono);
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
       font-size: 12px;
       color: var(--muted);
       padding: 6px 10px;
@@ -93,6 +96,29 @@ const user = Astro.locals.user;
       border-left: 2px solid var(--accent);
       margin: 4px 0;
       border-radius: 4px;
+    }
+    .tool-use .tool-name {
+      font-weight: 600;
+      color: var(--text);
+      font-family: var(--mono);
+    }
+    .tool-use .tool-query {
+      font-style: italic;
+      color: var(--muted);
+    }
+    .tool-use .tool-query::before { content: "“"; }
+    .tool-use .tool-query::after  { content: "”"; }
+    .tool-use .tool-summary {
+      color: var(--accent);
+    }
+    .tool-use .tool-state-pending,
+    .tool-use .tool-state-calling,
+    .tool-use .tool-state-running {
+      color: var(--muted);
+      font-style: italic;
+    }
+    .tool-use .tool-state-error {
+      color: #ff7b7b;
     }
     .chat-compose {
       display: flex;
@@ -213,6 +239,10 @@ const user = Astro.locals.user;
       mediaType?: string;
       url?: string;
       filename?: string;
+      toolName?: string;
+      input?: unknown;
+      output?: unknown;
+      error?: string;
     }
     interface Msg {
       id: string;
@@ -254,12 +284,7 @@ const user = Astro.locals.user;
       const label = m.role === "user" ? escapeHtml(userName) : "Warbotics";
       bubble.innerHTML = `<div class="role">${label}</div>`;
       for (const t of tools) {
-        const toolEl = document.createElement("div");
-        toolEl.className = "tool-use";
-        const name = t.type.replace(/^tool-/, "");
-        const status = t.state ?? "running";
-        toolEl.textContent = `↳ ${name} (${status})`;
-        bubble.appendChild(toolEl);
+        bubble.appendChild(renderToolUse(t));
       }
       const textEl = document.createElement("div");
       textEl.className = "text";
@@ -283,6 +308,72 @@ const user = Astro.locals.user;
         bubble.appendChild(filesEl);
       }
       return bubble;
+    }
+
+    const TOOL_ICONS: Record<string, string> = {
+      search_team_docs: "📘",
+      search_wpilib: "📚",
+      search_my_notes: "🗒️",
+      save_note: "💾",
+    };
+
+    function extractQuery(input: unknown): string {
+      if (input && typeof input === "object" && "query" in input) {
+        const q = (input as { query?: unknown }).query;
+        if (typeof q === "string") return q;
+      }
+      if (input && typeof input === "object" && "title" in input) {
+        const t = (input as { title?: unknown }).title;
+        if (typeof t === "string") return t;
+      }
+      return "";
+    }
+
+    function summarizeOutput(output: unknown): string {
+      if (output == null) return "";
+      if (Array.isArray(output)) {
+        return `${output.length} hit${output.length === 1 ? "" : "s"}`;
+      }
+      if (typeof output === "object" && "saved" in output && (output as { saved?: boolean }).saved) {
+        return "saved";
+      }
+      return "";
+    }
+
+    function renderToolUse(t: Part): HTMLDivElement {
+      const el = document.createElement("div");
+      el.className = "tool-use";
+      const name = t.toolName ?? (t.type.replace(/^tool-/, "") || "tool");
+      const icon = TOOL_ICONS[name] ?? "🔧";
+      const state = t.state ?? "pending";
+      const query = extractQuery(t.input);
+      const summary = state === "done" ? summarizeOutput(t.output) : "";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "tool-name";
+      nameEl.textContent = `${icon} ${name}`;
+      el.appendChild(nameEl);
+
+      if (query) {
+        const qEl = document.createElement("span");
+        qEl.className = "tool-query";
+        qEl.textContent = query;
+        el.appendChild(qEl);
+      }
+
+      if (summary) {
+        const sEl = document.createElement("span");
+        sEl.className = "tool-summary";
+        sEl.textContent = summary;
+        el.appendChild(sEl);
+      } else if (state !== "done") {
+        const stEl = document.createElement("span");
+        stEl.className = `tool-state-${state}`;
+        stEl.textContent = state === "error" ? (t.error ?? "error") : `${state}…`;
+        el.appendChild(stEl);
+      }
+
+      return el;
     }
 
     function renderAttachments(): void {
@@ -446,14 +537,20 @@ const user = Astro.locals.user;
       toolName?: string;
       name?: string;
       state?: string;
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
     }
 
     function handleEvent(asstId: string, event: StreamEvent): void {
       const t = event.type;
       if (!t) return;
+
       if (t === "text-start") {
         upsertPart(asstId, event.id ?? "t", { type: "text", text: "" });
-      } else if (t === "text-delta") {
+        return;
+      }
+      if (t === "text-delta") {
         const m = messages.find((x) => x.id === asstId);
         if (!m) return;
         const p = m.parts.find((x) => x._id === (event.id ?? "t") && x.type === "text");
@@ -461,23 +558,38 @@ const user = Astro.locals.user;
           p.text = (p.text || "") + (event.delta ?? "");
           render();
         }
-      } else if (t === "text-end") {
-        /* no-op */
-      } else if (t.startsWith("tool-input")) {
-        /* ignore input streaming events */
-      } else if (t.startsWith("tool-output-available") || t === "tool-result") {
-        const name =
-          event.toolName ?? event.name ?? t.replace(/^tool-output-available-?/, "").replace(/^tool-result-?/, "");
-        upsertPart(asstId, `tool-${event.toolCallId ?? event.id ?? name}`, {
-          type: `tool-${name}`,
-          state: "done",
-        });
-      } else if (t.startsWith("tool-")) {
-        const name = t.replace(/^tool-/, "");
-        upsertPart(asstId, `tool-${event.toolCallId ?? event.id ?? name}`, {
-          type: `tool-${name}`,
-          state: event.state ?? "running",
-        });
+        return;
+      }
+      if (t === "text-end") return;
+
+      // Tool lifecycle. In AI SDK v6 the tool-call id is the join key across
+      // input-start, input-delta, input-available, and output-available events.
+      // toolName is on input-*, not on output-*.
+      if (t.startsWith("tool-")) {
+        const toolId = event.toolCallId ?? event.id;
+        if (!toolId) return;
+        const partId = `tool-${toolId}`;
+
+        if (t === "tool-input-start") {
+          upsertPart(asstId, partId, {
+            type: `tool-${event.toolName ?? "unknown"}`,
+            state: "calling",
+            toolName: event.toolName,
+          });
+        } else if (t === "tool-input-delta") {
+          /* ignore streaming input text */
+        } else if (t === "tool-input-available") {
+          upsertPart(asstId, partId, {
+            type: `tool-${event.toolName ?? "unknown"}`,
+            state: "running",
+            toolName: event.toolName,
+            input: event.input,
+          });
+        } else if (t === "tool-output-available" || t === "tool-result") {
+          upsertPart(asstId, partId, { state: "done", output: event.output });
+        } else if (t === "tool-output-error" || t === "tool-input-error") {
+          upsertPart(asstId, partId, { state: "error", error: event.errorText ?? "error" });
+        }
       }
     }
 
