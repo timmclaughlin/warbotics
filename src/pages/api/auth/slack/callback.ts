@@ -8,6 +8,7 @@ import {
   type SessionData,
 } from "~/lib/session";
 import { searchClientFromEnv, userInstanceId } from "~/lib/search";
+import { recordUserSighting } from "~/lib/settings";
 
 export const prerender = false;
 
@@ -91,6 +92,15 @@ export const GET: APIRoute = async ({ locals, url, request }) => {
     createdAt: Date.now(),
   };
   await saveSession(env.SESSIONS, sessionId, session);
+
+  // Register the user in config.knownUsers so admins can pick from a
+  // roster of real people instead of typing Slack user IDs. Best-effort.
+  await recordUserSighting(env, {
+    slackUserId,
+    name: info.name,
+    email: info.email,
+    avatar: info.picture,
+  });
 
   const jwt = await signSessionCookie(sessionId, env.SESSION_SECRET);
   const headers = new Headers();

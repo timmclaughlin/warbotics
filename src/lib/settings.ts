@@ -21,8 +21,23 @@ export interface Source {
   lastIndexedAt?: string;
 }
 
+// Every time a Slack user signs in, we stash a record here so admins can
+// pick from a list of "people who've actually logged in" rather than
+// typing opaque Slack user IDs. Display name drives the admin UI.
+export interface KnownUser {
+  slackUserId: string;
+  name: string;
+  email?: string;
+  avatar?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
 export interface AppConfig {
+  // Slack user IDs (U01ABCDE…) of admins — plus the OWNER_EMAIL env user
+  // who is always admin as a lockout safety net.
   admins: string[];
+  knownUsers: KnownUser[];
   sources: Source[];
   updatedAt?: string;
   updatedBy?: string;
@@ -32,6 +47,7 @@ const CONFIG_KEY = "config.json";
 
 export const DEFAULT_CONFIG: AppConfig = {
   admins: [],
+  knownUsers: [],
   sources: [
     {
       id: "warbotics-content",
@@ -64,10 +80,9 @@ export const DEFAULT_CONFIG: AppConfig = {
 export async function loadConfig(env: Env): Promise<AppConfig> {
   const obj = await env.CONFIG_R2.get(CONFIG_KEY);
   if (!obj) {
-    const seeded: AppConfig = {
-      ...DEFAULT_CONFIG,
-      admins: env.OWNER_EMAIL ? [env.OWNER_EMAIL.toLowerCase()] : [],
-    };
+    // On first-ever load, start with no admins: the OWNER_EMAIL env var
+    // grants access until the owner adds other admins via /settings.
+    const seeded: AppConfig = { ...DEFAULT_CONFIG };
     await saveConfig(env, seeded, env.OWNER_EMAIL ?? "system");
     return seeded;
   }
@@ -75,13 +90,17 @@ export async function loadConfig(env: Env): Promise<AppConfig> {
     const text = await obj.text();
     const parsed = JSON.parse(text) as Partial<AppConfig>;
     return {
-      admins: Array.isArray(parsed.admins) ? parsed.admins.map((e) => e.toLowerCase()) : [],
+      // Admin entries are case-sensitive Slack user IDs (U01…); legacy
+      // email-shaped entries are kept but won't match anyone until the
+      // OWNER cleans them up in /settings.
+      admins: Array.isArray(parsed.admins) ? parsed.admins.map((e) => String(e).trim()).filter(Boolean) : [],
+      knownUsers: Array.isArray(parsed.knownUsers) ? parsed.knownUsers : [],
       sources: Array.isArray(parsed.sources) ? parsed.sources : [],
       updatedAt: parsed.updatedAt,
       updatedBy: parsed.updatedBy,
     };
   } catch {
-    return { ...DEFAULT_CONFIG, admins: env.OWNER_EMAIL ? [env.OWNER_EMAIL.toLowerCase()] : [] };
+    return { ...DEFAULT_CONFIG };
   }
 }
 
@@ -91,7 +110,8 @@ export async function saveConfig(
   updatedBy: string,
 ): Promise<AppConfig> {
   const normalized: AppConfig = {
-    admins: Array.from(new Set((config.admins ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean))),
+    admins: Array.from(new Set((config.admins ?? []).map((e) => String(e).trim()).filter(Boolean))),
+    knownUsers: Array.isArray(config.knownUsers) ? config.knownUsers : [],
     sources: Array.isArray(config.sources) ? config.sources : [],
     updatedAt: new Date().toISOString(),
     updatedBy,
@@ -102,14 +122,49 @@ export async function saveConfig(
   return normalized;
 }
 
+// Upsert a user into knownUsers on sign-in so admins can pick from a
+// list of people who've actually logged in. Never fails the caller —
+// swallows errors so a bad R2 write doesn't break login.
+export async function recordUserSighting(
+  env: Env,
+  user: { slackUserId: string; name: string; email?: string; avatar?: string },
+): Promise<void> {
+  try {
+    const config = await loadConfig(env);
+    const now = new Date().toISOString();
+    const existing = config.knownUsers.find((u) => u.slackUserId === user.slackUserId);
+    if (existing) {
+      existing.name = user.name;
+      existing.email = user.email;
+      existing.avatar = user.avatar;
+      existing.lastSeenAt = now;
+    } else {
+      config.knownUsers.push({
+        slackUserId: user.slackUserId,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      });
+    }
+    await saveConfig(env, config, `session:${user.slackUserId}`);
+  } catch (err) {
+    console.warn("recordUserSighting failed (non-fatal)", err);
+  }
+}
+
 export function validateConfig(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return "Config must be an object.";
   const c = raw as Record<string, unknown>;
-  if (!Array.isArray(c.admins)) return "`admins` must be an array of email addresses.";
+  if (!Array.isArray(c.admins)) return "`admins` must be an array of Slack user IDs.";
   for (const a of c.admins) {
-    if (typeof a !== "string" || !/.+@.+\..+/.test(a)) {
-      return `Invalid admin email: ${JSON.stringify(a)}`;
+    if (typeof a !== "string" || !a.trim()) {
+      return `Invalid admin entry: ${JSON.stringify(a)}`;
     }
+  }
+  if (c.knownUsers !== undefined && !Array.isArray(c.knownUsers)) {
+    return "`knownUsers` must be an array.";
   }
   if (!Array.isArray(c.sources)) return "`sources` must be an array.";
   for (const s of c.sources as unknown[]) {

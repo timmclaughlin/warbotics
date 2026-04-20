@@ -37,20 +37,30 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
     .admin-row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
+      gap: 10px;
+      padding: 8px 12px;
       background: var(--surface-2);
       border: 1px solid var(--border);
       border-radius: 6px;
       margin: 4px 0;
     }
-    .admin-row input {
+    .admin-row .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+    .admin-row .who {
       flex: 1;
-      background: transparent;
-      color: var(--text);
-      border: 0;
-      padding: 4px;
-      font: inherit;
+      min-width: 0;
+    }
+    .admin-row .name { font-weight: 600; }
+    .admin-row .sub {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
     }
     .admin-row .tag-owner {
       font-size: 10px;
@@ -59,6 +69,36 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
       color: var(--accent);
       font-weight: 600;
     }
+    .admin-row .unknown {
+      color: #ff7b7b;
+      font-size: 11px;
+      font-style: italic;
+    }
+    .admin-row .remove {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .admin-row .remove:hover { color: #ff7b7b; border-color: #ff7b7b; }
+    .admin-picker {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .admin-picker select {
+      flex: 1;
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+    .admin-picker .btn { flex-shrink: 0; }
     .source-row {
       display: grid;
       grid-template-columns: 28px 1fr auto;
@@ -195,10 +235,16 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
       <h2>Admins</h2>
       <p class="muted">
         Anyone on this list (plus the bootstrap owner from <code>OWNER_EMAIL</code>)
-        can view and edit this page.
+        can view and edit this page. Admins are identified by Slack user —
+        a person has to sign in at least once before they can be added.
       </p>
       <div id="admins-list"></div>
-      <button type="button" class="btn secondary" id="add-admin">+ Add admin</button>
+      <div class="admin-picker">
+        <select id="admin-picker">
+          <option value="">Pick someone who's signed in…</option>
+        </select>
+        <button type="button" class="btn secondary" id="add-admin">Add admin</button>
+      </div>
     </div>
 
     <div class="settings-card" id="sources-card">
@@ -228,16 +274,21 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
   </div>
 
   <script>
-    import type { AppConfig, Source } from "~/lib/settings";
+    import type { AppConfig, KnownUser, Source } from "~/lib/settings";
 
     const shell = document.querySelector(".settings-shell") as HTMLDivElement;
     const initial = JSON.parse(shell.dataset.initial ?? "{}") as AppConfig;
     const ownerEmail = (shell.dataset.ownerEmail ?? "").toLowerCase();
 
     const adminsList = document.getElementById("admins-list") as HTMLDivElement;
+    const adminPicker = document.getElementById("admin-picker") as unknown as HTMLSelectElement;
     const sourcesList = document.getElementById("sources-list") as HTMLDivElement;
     const rawEditor = document.getElementById("raw-editor") as HTMLTextAreaElement;
     const status = document.getElementById("status") as HTMLSpanElement;
+
+    function userByAdminEntry(entry: string, known: KnownUser[]): KnownUser | undefined {
+      return known.find((u) => u.slackUserId === entry);
+    }
 
     let state: AppConfig = JSON.parse(JSON.stringify(initial));
 
@@ -248,38 +299,123 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
 
     function renderAdmins(): void {
       adminsList.innerHTML = "";
-      state.admins.forEach((email, idx) => {
-        const row = document.createElement("div");
-        row.className = "admin-row";
-        const input = document.createElement("input");
-        input.type = "email";
-        input.value = email;
-        input.placeholder = "someone@example.com";
-        input.addEventListener("input", () => {
-          state.admins[idx] = input.value.trim();
-          refreshRawEditor();
-        });
-        row.appendChild(input);
-        if (email.toLowerCase() === ownerEmail) {
-          const tag = document.createElement("span");
-          tag.className = "tag-owner";
-          tag.textContent = "OWNER";
-          tag.title = "Set via OWNER_EMAIL env var — always admin even if removed here.";
-          row.appendChild(tag);
-        } else {
-          const rm = document.createElement("button");
-          rm.type = "button";
-          rm.className = "remove";
-          rm.textContent = "Remove";
-          rm.addEventListener("click", () => {
+      const known = state.knownUsers ?? [];
+
+      // Render the env OWNER as an always-on row (not stored in state).
+      if (ownerEmail) {
+        const ownerUser = known.find((u) => (u.email ?? "").toLowerCase() === ownerEmail);
+        adminsList.appendChild(renderAdminRow({
+          name: ownerUser?.name ?? ownerEmail,
+          sub: ownerUser?.slackUserId ? `slack ${ownerUser.slackUserId}` : ownerEmail,
+          avatar: ownerUser?.avatar,
+          ownerBadge: true,
+        }));
+      }
+
+      state.admins.forEach((entry, idx) => {
+        const u = userByAdminEntry(entry, known);
+        // Don't re-render the owner twice if they also happen to be in
+        // the admins list by slackUserId.
+        if (u && ownerEmail && (u.email ?? "").toLowerCase() === ownerEmail) return;
+        adminsList.appendChild(renderAdminRow({
+          name: u?.name,
+          sub: u?.slackUserId ? `slack ${u.slackUserId}` : undefined,
+          avatar: u?.avatar,
+          rawEntry: entry,
+          onRemove: () => {
             state.admins.splice(idx, 1);
             renderAdmins();
+            renderAdminPicker();
             refreshRawEditor();
-          });
-          row.appendChild(rm);
-        }
-        adminsList.appendChild(row);
+          },
+        }));
       });
+    }
+
+    function renderAdminRow(opts: {
+      name?: string;
+      sub?: string;
+      avatar?: string;
+      ownerBadge?: boolean;
+      rawEntry?: string;
+      onRemove?: () => void;
+    }): HTMLDivElement {
+      const row = document.createElement("div");
+      row.className = "admin-row";
+
+      if (opts.avatar) {
+        const img = document.createElement("img");
+        img.className = "avatar";
+        img.src = opts.avatar;
+        img.alt = opts.name ?? "";
+        row.appendChild(img);
+      } else {
+        const placeholder = document.createElement("span");
+        placeholder.className = "avatar";
+        row.appendChild(placeholder);
+      }
+
+      const who = document.createElement("div");
+      who.className = "who";
+      const name = document.createElement("div");
+      name.className = "name";
+      if (opts.name) {
+        name.textContent = opts.name;
+      } else {
+        name.innerHTML = `<span class="unknown">Unknown user</span>`;
+      }
+      who.appendChild(name);
+      const sub = document.createElement("div");
+      sub.className = "sub";
+      sub.textContent = opts.sub ?? opts.rawEntry ?? "";
+      who.appendChild(sub);
+      row.appendChild(who);
+
+      if (opts.ownerBadge) {
+        const tag = document.createElement("span");
+        tag.className = "tag-owner";
+        tag.textContent = "OWNER";
+        tag.title = "Set via OWNER_EMAIL env var — always admin, not editable here.";
+        row.appendChild(tag);
+      } else if (opts.onRemove) {
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "remove";
+        rm.textContent = "Remove";
+        rm.addEventListener("click", opts.onRemove);
+        row.appendChild(rm);
+      }
+      return row;
+    }
+
+    function renderAdminPicker(): void {
+      adminPicker.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Pick someone who's signed in…";
+      adminPicker.appendChild(placeholder);
+
+      const known = state.knownUsers ?? [];
+      const already = new Set(state.admins);
+      const ownerInList = known.find((u) => (u.email ?? "").toLowerCase() === ownerEmail);
+      if (ownerInList) already.add(ownerInList.slackUserId);
+
+      const candidates = known
+        .filter((u) => !already.has(u.slackUserId))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      for (const u of candidates) {
+        const opt = document.createElement("option");
+        opt.value = u.slackUserId;
+        opt.textContent = u.email ? `${u.name} — ${u.email}` : u.name;
+        adminPicker.appendChild(opt);
+      }
+      if (candidates.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "— no other users have signed in yet —";
+        opt.disabled = true;
+        adminPicker.appendChild(opt);
+      }
     }
 
     function renderSources(): void {
@@ -390,14 +526,20 @@ const youAreOwner = user?.email?.toLowerCase() === env.OWNER_EMAIL?.toLowerCase(
 
     function render(): void {
       renderAdmins();
+      renderAdminPicker();
       renderSources();
       refreshRawEditor();
     }
 
     document.getElementById("add-admin")!.addEventListener("click", () => {
-      state.admins.push("");
+      const pick = adminPicker.value;
+      if (!pick) return;
+      if (state.admins.includes(pick)) return;
+      state.admins.push(pick);
       renderAdmins();
+      renderAdminPicker();
       refreshRawEditor();
+      adminPicker.value = "";
     });
 
     document.getElementById("add-source")!.addEventListener("click", () => {

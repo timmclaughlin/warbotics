@@ -187,6 +187,46 @@ const user = Astro.locals.user;
       outline: 2px dashed var(--accent);
       outline-offset: -6px;
     }
+    /* Inline citation: a small [wpilib] / [team] / etc. chip that
+     * expands inline to reveal the cited title + link on click.
+     * Two-click UX: click chip → see title; click title → visit. */
+    details.cite {
+      display: inline;
+    }
+    details.cite > summary {
+      display: inline;
+      cursor: pointer;
+      list-style: none;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+      vertical-align: baseline;
+      user-select: none;
+      border: 1px solid transparent;
+    }
+    details.cite > summary:hover {
+      border-color: var(--accent);
+    }
+    details.cite > summary::-webkit-details-marker { display: none; }
+    details.cite > summary::marker { content: ""; }
+    details.cite[open] > summary {
+      background: var(--accent);
+      color: #111;
+    }
+    details.cite > .cite-body {
+      display: inline;
+      margin-left: 6px;
+      font-size: 0.92em;
+    }
+    details.cite > .cite-body a {
+      color: var(--link);
+      text-decoration: underline;
+    }
     details.sources {
       margin-top: 12px;
       padding-top: 10px;
@@ -330,14 +370,41 @@ const user = Astro.locals.user;
 
     marked.setOptions({ gfm: true, breaks: true });
 
-    // Open every link in the assistant's markdown output in a new tab so
-    // the user can cross-reference sources without losing their chat.
+    // Classify an href to a short source tag for the citation chip.
+    function citationSource(href: string): string {
+      if (!href) return "link";
+      if (href.startsWith("https://docs.wpilib.org/")) return "wpilib";
+      if (href.startsWith("/docs/") || /warbotics\.[^/]+\/docs\//.test(href)) return "team";
+      if (href.startsWith("#")) return "ref";
+      try {
+        const u = new URL(href, window.location.origin);
+        const host = u.hostname.replace(/^www\./, "");
+        // Take the registrable name without TLD where obvious: github.com → github
+        const parts = host.split(".");
+        return parts.length >= 2 ? parts[parts.length - 2] : host;
+      } catch {
+        return "link";
+      }
+    }
+
+    // Wrap every link in the assistant's markdown output in a two-click
+    // citation: click the [source] chip to reveal the title + link; click
+    // the title to actually visit (new tab). Gives a terse in-line look
+    // while keeping the source verifiable.
     marked.use({
       renderer: {
         link(this: { parser: { parseInline: (tokens: Tokens.Generic[]) => string } }, token: Tokens.Link): string {
-          const text = this.parser.parseInline(token.tokens);
+          const title = this.parser.parseInline(token.tokens);
+          const source = citationSource(token.href);
           const titleAttr = token.title ? ` title="${String(token.title).replace(/"/g, "&quot;")}"` : "";
-          return `<a href="${token.href}"${titleAttr} target="_blank" rel="noopener">${text}</a>`;
+          return (
+            `<details class="cite" data-source="${source}">` +
+              `<summary>${source}</summary>` +
+              `<span class="cite-body">` +
+                `<a href="${token.href}"${titleAttr} target="_blank" rel="noopener">${title}</a>` +
+              `</span>` +
+            `</details>`
+          );
         },
       },
     });
