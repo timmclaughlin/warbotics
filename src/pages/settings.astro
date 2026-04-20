@@ -1,10 +1,23 @@
 ---
 import Base from "~/layouts/Base.astro";
 import { isAdmin } from "~/lib/acl";
-import { loadConfig } from "~/lib/settings";
+import { loadConfig, recordUserSighting } from "~/lib/settings";
 
 const env = Astro.locals.runtime.env as Env;
 const user = Astro.locals.user;
+
+// If the viewer has a session from BEFORE recordUserSighting was deployed,
+// their knownUsers entry may be missing — which would make the admin row
+// render as a raw email. Sync now so the UI shows their actual Slack name.
+if (user) {
+  await recordUserSighting(env, {
+    slackUserId: user.slackUserId,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+  });
+}
+
 const config = await loadConfig(env);
 
 if (!isAdmin(user, config, env)) {

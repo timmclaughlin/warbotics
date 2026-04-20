@@ -89,11 +89,14 @@ export async function loadConfig(env: Env): Promise<AppConfig> {
   try {
     const text = await obj.text();
     const parsed = JSON.parse(text) as Partial<AppConfig>;
+    // Silently drop legacy email-shaped admin entries left over from
+    // before admins were slackUserId-based. OWNER_EMAIL still grants
+    // access regardless, so no one gets locked out.
+    const admins = Array.isArray(parsed.admins)
+      ? parsed.admins.map((e) => String(e).trim()).filter((e) => e && !e.includes("@"))
+      : [];
     return {
-      // Admin entries are case-sensitive Slack user IDs (U01…); legacy
-      // email-shaped entries are kept but won't match anyone until the
-      // OWNER cleans them up in /settings.
-      admins: Array.isArray(parsed.admins) ? parsed.admins.map((e) => String(e).trim()).filter(Boolean) : [],
+      admins,
       knownUsers: Array.isArray(parsed.knownUsers) ? parsed.knownUsers : [],
       sources: Array.isArray(parsed.sources) ? parsed.sources : [],
       updatedAt: parsed.updatedAt,
