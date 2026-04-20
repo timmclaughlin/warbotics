@@ -194,8 +194,14 @@ export class ReindexSourceWorkflow extends WorkflowEntrypoint<Env, ReindexParams
 
             const title = extractTitle(text, entry.path);
             const body = title ? `# ${title}\n\n${text}` : text;
+            // Strip the repo-relative sourceDir prefix (e.g. `source/`) from
+            // the item key so URL mapping in src/lib/urls.ts produces a
+            // publishing-path URL (WPILib's Sphinx build drops `source/`).
+            const relPath = sourceDir
+              ? entry.path.replace(new RegExp(`^${sourceDir}/`), "")
+              : entry.path;
             // Rewrite `.rst` → `.md` so AI Search treats the item as markdown.
-            const key = entry.path.replace(/\.rst$/, ".md");
+            const key = relPath.replace(/\.rst$/, ".md");
             await withBackoff(
               () => client.uploadItem(source.instance, key, body, {
                 title,

@@ -325,10 +325,22 @@ const user = Astro.locals.user;
   </div>
 
   <script>
-    import { marked } from "marked";
+    import { marked, type Tokens } from "marked";
     import { isQuestion } from "~/lib/is-question";
 
     marked.setOptions({ gfm: true, breaks: true });
+
+    // Open every link in the assistant's markdown output in a new tab so
+    // the user can cross-reference sources without losing their chat.
+    marked.use({
+      renderer: {
+        link(this: { parser: { parseInline: (tokens: Tokens.Generic[]) => string } }, token: Tokens.Link): string {
+          const text = this.parser.parseInline(token.tokens);
+          const titleAttr = token.title ? ` title="${String(token.title).replace(/"/g, "&quot;")}"` : "";
+          return `<a href="${token.href}"${titleAttr} target="_blank" rel="noopener">${text}</a>`;
+        },
+      },
+    });
 
     const log = document.getElementById("chat-log") as HTMLDivElement;
     const form = document.getElementById("chat-form") as HTMLFormElement;
