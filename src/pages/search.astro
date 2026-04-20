@@ -187,18 +187,14 @@ const user = Astro.locals.user;
       outline: 2px dashed var(--accent);
       outline-offset: -6px;
     }
-    /* Inline citation: a small [wpilib] / [team] / etc. chip that
-     * expands inline to reveal the cited title + link on click.
-     * Two-click UX: click chip → see title; click title → visit. */
-    details.cite {
-      display: inline;
-    }
-    details.cite > summary {
-      display: inline;
+    /* Citation chip: small [wpilib] / [team] / etc. pill the user clicks
+     * to pop a floating bubble with the title + link. Bubble dismisses
+     * on outside click or Escape. Two-click UX: chip → bubble → link. */
+    .cite-chip {
+      display: inline-block;
       cursor: pointer;
-      list-style: none;
       font-size: 10px;
-      padding: 1px 6px;
+      padding: 1px 7px;
       border-radius: 999px;
       background: var(--accent-soft);
       color: var(--accent);
@@ -208,24 +204,47 @@ const user = Astro.locals.user;
       vertical-align: baseline;
       user-select: none;
       border: 1px solid transparent;
+      font-family: inherit;
+      line-height: 1.35;
     }
-    details.cite > summary:hover {
-      border-color: var(--accent);
-    }
-    details.cite > summary::-webkit-details-marker { display: none; }
-    details.cite > summary::marker { content: ""; }
-    details.cite[open] > summary {
+    .cite-chip:hover { border-color: var(--accent); }
+    .cite-chip.active {
       background: var(--accent);
       color: #111;
+      border-color: var(--accent);
     }
-    details.cite > .cite-body {
-      display: inline;
-      margin-left: 6px;
-      font-size: 0.92em;
+    .cite-popover {
+      position: absolute;
+      z-index: 1000;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      max-width: min(420px, calc(100vw - 24px));
+      font-size: 13px;
+      color: var(--text);
     }
-    details.cite > .cite-body a {
+    .cite-popover[hidden] { display: none; }
+    .cite-popover .cite-pop-source {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .cite-popover a {
       color: var(--link);
       text-decoration: underline;
+      word-break: break-word;
+    }
+    .cite-popover .cite-pop-url {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      word-break: break-all;
     }
     details.sources {
       margin-top: 12px;
@@ -387,23 +406,29 @@ const user = Astro.locals.user;
       }
     }
 
-    // Wrap every link in the assistant's markdown output in a two-click
-    // citation: click the [source] chip to reveal the title + link; click
-    // the title to actually visit (new tab). Gives a terse in-line look
-    // while keeping the source verifiable.
+    function escapeAttr(s: string): string {
+      return String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // Render every link in the assistant's markdown as a compact chip.
+    // Clicking the chip pops a floating bubble with the title + link;
+    // the bubble dismisses on outside click / Escape / scroll.
     marked.use({
       renderer: {
-        link(this: { parser: { parseInline: (tokens: Tokens.Generic[]) => string } }, token: Tokens.Link): string {
-          const title = this.parser.parseInline(token.tokens);
+        link(this: unknown, token: Tokens.Link): string {
           const source = citationSource(token.href);
-          const titleAttr = token.title ? ` title="${String(token.title).replace(/"/g, "&quot;")}"` : "";
+          // Use raw link text (no nested HTML) — bubble renders plain string.
+          const title = token.text || token.href;
           return (
-            `<details class="cite" data-source="${source}">` +
-              `<summary>${source}</summary>` +
-              `<span class="cite-body">` +
-                `<a href="${token.href}"${titleAttr} target="_blank" rel="noopener">${title}</a>` +
-              `</span>` +
-            `</details>`
+            `<button type="button" class="cite-chip"` +
+            ` data-href="${escapeAttr(token.href)}"` +
+            ` data-title="${escapeAttr(title)}"` +
+            ` data-source="${escapeAttr(source)}"` +
+            `>${escapeAttr(source)}</button>`
           );
         },
       },
@@ -1065,6 +1090,95 @@ const user = Astro.locals.user;
 
     // Initial paint so the toggle reflects "auto / search" on load.
     refreshToggle();
+
+    // Citation popover: one floating bubble shared across all chips.
+    // Click chip → show near it with title + link. Click outside or
+    // press Escape → hide.
+    let citePopover: HTMLDivElement | null = null;
+    function ensurePopover(): HTMLDivElement {
+      if (!citePopover) {
+        citePopover = document.createElement("div");
+        citePopover.className = "cite-popover";
+        citePopover.hidden = true;
+        document.body.appendChild(citePopover);
+      }
+      return citePopover;
+    }
+    function hideCitePopover(): void {
+      if (citePopover) citePopover.hidden = true;
+      document.querySelectorAll(".cite-chip.active").forEach((el) => el.classList.remove("active"));
+    }
+    function showCitePopover(chip: HTMLElement): void {
+      const href = chip.dataset.href ?? "#";
+      const title = chip.dataset.title ?? href;
+      const source = chip.dataset.source ?? "";
+      const p = ensurePopover();
+
+      p.innerHTML = "";
+      if (source) {
+        const srcEl = document.createElement("div");
+        srcEl.className = "cite-pop-source";
+        srcEl.textContent = source;
+        p.appendChild(srcEl);
+      }
+      const titleEl = document.createElement("a");
+      titleEl.href = href;
+      titleEl.target = "_blank";
+      titleEl.rel = "noopener";
+      titleEl.textContent = title;
+      p.appendChild(titleEl);
+      // Raw URL under the title — scannable even without clicking through.
+      const urlEl = document.createElement("div");
+      urlEl.className = "cite-pop-url";
+      urlEl.textContent = href;
+      p.appendChild(urlEl);
+
+      // Show first so we can measure it, then position.
+      p.hidden = false;
+      document.querySelectorAll(".cite-chip.active").forEach((el) => el.classList.remove("active"));
+      chip.classList.add("active");
+
+      const chipRect = chip.getBoundingClientRect();
+      const popRect = p.getBoundingClientRect();
+      const margin = 8;
+      let top = chipRect.bottom + window.scrollY + 4;
+      let left = chipRect.left + window.scrollX;
+      if (left + popRect.width > window.scrollX + window.innerWidth - margin) {
+        left = window.scrollX + window.innerWidth - popRect.width - margin;
+      }
+      if (left < margin) left = margin;
+      // If there's no room below the chip, flip above.
+      if (chipRect.bottom + popRect.height + 8 > window.innerHeight) {
+        top = chipRect.top + window.scrollY - popRect.height - 4;
+      }
+      p.style.top = `${top}px`;
+      p.style.left = `${left}px`;
+    }
+
+    document.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const chip = target.closest<HTMLElement>(".cite-chip");
+      if (chip) {
+        e.preventDefault();
+        // If the same chip is already active, toggle off.
+        if (chip.classList.contains("active")) {
+          hideCitePopover();
+        } else {
+          showCitePopover(chip);
+        }
+        return;
+      }
+      if (citePopover && !citePopover.hidden && !target.closest(".cite-popover")) {
+        hideCitePopover();
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") hideCitePopover();
+    });
+    // Hide on scroll-in-log so the popover doesn't detach visually from
+    // its chip as the chat log scrolls.
+    log.addEventListener("scroll", hideCitePopover, { passive: true });
+    window.addEventListener("resize", hideCitePopover);
 
     // Accept an initial query via ?q=… and auto-submit. Clear the param
     // so reload doesn't duplicate.
