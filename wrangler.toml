@@ -18,6 +18,18 @@ assets = { directory = "./dist", binding = "ASSETS" }
 [observability]
 enabled = true
 
+[observability.logs]
+enabled = true
+destinations = [ "clickstack-logs" ]
+head_sampling_rate = 1
+persist = false
+
+[observability.traces]
+enabled = true
+destinations = [ "clickstack-traces" ]
+head_sampling_rate = 1
+persist = false
+
 # Public, non-secret vars. Secrets (*_SECRET, tokens) go through `wrangler secret put`.
 [vars]
 CLOUDFLARE_ACCOUNT_ID = "e9abbdd7b6e80b20b43abe0c39a09019"
